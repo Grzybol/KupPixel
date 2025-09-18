@@ -26,7 +26,13 @@ Każdy piksel można kliknąć, zobaczyć czy jest wolny czy zajęty i w przysz�
 
 - **Frontend**: React + TypeScript + Tailwind CSS  
 - **Backend**: Go (Gin framework) – API REST do obsługi pikseli  
-- **Baza danych**: na start in-memory (mapa pikseli), docelowo Redis/Mongo/Postgres  
-- **Docker**: multi-stage build → jeden image z frontendem i backendem  
-- **Nginx/Reverse Proxy**: opcjonalnie do hostingu na VPS + SSL  
+- **Baza danych**: SQLite (plik tworzony domyślnie pod `backend/data/pixels.db`, można zmienić ścieżkę zmienną `PIXEL_DB_PATH`)
+- **Docker**: multi-stage build → jeden image z frontendem i backendem
+- **Nginx/Reverse Proxy**: opcjonalnie do hostingu na VPS + SSL
+
+### 💾 Przechowywanie danych backendu
+
+- Domyślny plik bazy: `backend/data/pixels.db` (tworzony automatycznie przy starcie backendu).
+- Zmienna środowiskowa `PIXEL_DB_PATH` pozwala wskazać inną lokalizację pliku.
+- Kopię zapasową najlepiej wykonywać po zatrzymaniu serwera (lub po `COMMIT`). Można też użyć polecenia `sqlite3 pixels.db ".backup backup.db"` na bieżącej instancji.
 

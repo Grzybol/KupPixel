@@ -41,7 +41,7 @@ func Open(path string) (*Store, error) {
 		return nil, errors.New("sqlite path must not be empty")
 	}
 
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}

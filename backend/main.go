@@ -2,39 +2,28 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	gin "github.com/gin-gonic/gin"
+
+	"github.com/example/kup-piksel/internal/storage/sqlite"
 )
 
 //go:embed frontend_dist/*
 var frontendFS embed.FS
 
-const (
-	gridWidth  = 1000
-	gridHeight = 1000
-)
-
-type Pixel struct {
-	ID     int    `json:"id"`
-	Status string `json:"status"`
-	Color  string `json:"color,omitempty"`
-	URL    string `json:"url,omitempty"`
-}
-
-type PixelState struct {
-	Width  int     `json:"width"`
-	Height int     `json:"height"`
-	Pixels []Pixel `json:"pixels"`
-}
+const defaultDBPath = "data/pixels.db"
 
 type UpdatePixelRequest struct {
 	ID     int    `json:"id"`
@@ -43,18 +32,43 @@ type UpdatePixelRequest struct {
 	URL    string `json:"url"`
 }
 
-var (
-	pixels     []Pixel
-	pixelsLock sync.RWMutex
-)
+type Server struct {
+	store *sqlite.Store
+}
 
 func main() {
-	initPixels()
+	dbPath := os.Getenv("PIXEL_DB_PATH")
+	if dbPath == "" {
+		dbPath = defaultDBPath
+	}
+
+	if dir := filepath.Dir(dbPath); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			log.Fatalf("create database directory: %v", err)
+		}
+	}
+
+	store, err := sqlite.Open(dbPath)
+	if err != nil {
+		log.Fatalf("open sqlite store: %v", err)
+	}
+	defer func() {
+		if cerr := store.Close(); cerr != nil {
+			log.Printf("close store: %v", cerr)
+		}
+	}()
+
+	ctx := context.Background()
+	if err := store.EnsureSchema(ctx); err != nil {
+		log.Fatalf("ensure schema: %v", err)
+	}
+	seedDemoPixels(ctx, store)
 
 	router := gin.Default()
+	server := &Server{store: store}
 
-	router.GET("/api/pixels", handleGetPixels)
-	router.POST("/api/pixels", handleUpdatePixel)
+	router.GET("/api/pixels", server.handleGetPixels)
+	router.POST("/api/pixels", server.handleUpdatePixel)
 
 	if assets := embedSub("frontend_dist/assets"); assets != nil {
 		router.StaticFS("/assets", http.FS(assets))
@@ -70,75 +84,71 @@ func main() {
 	}
 }
 
-func initPixels() {
-	total := gridWidth * gridHeight
-	pixels = make([]Pixel, total)
-	for i := 0; i < total; i++ {
-		pixels[i] = Pixel{ID: i, Status: "free"}
+func (s *Server) handleGetPixels(c *gin.Context) {
+	state, err := s.store.GetAllPixels(c.Request.Context())
+	if err != nil {
+		log.Printf("get pixels: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load pixels"})
+		return
 	}
-
-	demo := []struct {
-		ID    int
-		Color string
-		URL   string
-	}{
-		{ID: 500500, Color: "#ff4d4f", URL: "https://example.com"},
-		{ID: 250250, Color: "#36cfc9", URL: "https://minecraft.net"},
-		{ID: 750750, Color: "#722ed1", URL: "https://github.com"},
-	}
-
-	for _, d := range demo {
-		if d.ID >= 0 && d.ID < total {
-			pixels[d.ID].Status = "taken"
-			pixels[d.ID].Color = d.Color
-			pixels[d.ID].URL = d.URL
-		}
-	}
+	c.JSON(http.StatusOK, state)
 }
 
-func handleGetPixels(c *gin.Context) {
-	pixelsLock.RLock()
-	defer pixelsLock.RUnlock()
-
-	response := PixelState{
-		Width:  gridWidth,
-		Height: gridHeight,
-		Pixels: pixels,
-	}
-	c.JSON(http.StatusOK, response)
-}
-
-func handleUpdatePixel(c *gin.Context) {
+func (s *Server) handleUpdatePixel(c *gin.Context) {
 	var req UpdatePixelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
 
-	if req.ID < 0 || req.ID >= len(pixels) {
+	if req.ID < 0 || req.ID >= sqlite.TotalPixels {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pixel id"})
 		return
 	}
 
-	pixelsLock.Lock()
-	defer pixelsLock.Unlock()
-
-	target := &pixels[req.ID]
 	if strings.ToLower(req.Status) == "taken" {
 		if req.Color == "" || req.URL == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "taken pixels require color and url"})
 			return
 		}
-		target.Status = "taken"
-		target.Color = req.Color
-		target.URL = req.URL
+		req.Status = "taken"
 	} else {
-		target.Status = "free"
-		target.Color = ""
-		target.URL = ""
+		req.Status = "free"
+		req.Color = ""
+		req.URL = ""
 	}
 
-	c.JSON(http.StatusOK, target)
+	updated, err := s.store.UpdatePixel(c.Request.Context(), sqlite.Pixel{
+		ID:     req.ID,
+		Status: req.Status,
+		Color:  req.Color,
+		URL:    req.URL,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "pixel not found"})
+			return
+		}
+		log.Printf("update pixel %d: %v", req.ID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update pixel"})
+		return
+	}
+
+	c.JSON(http.StatusOK, updated)
+}
+
+func seedDemoPixels(ctx context.Context, store *sqlite.Store) {
+	demo := []sqlite.Pixel{
+		{ID: 500500, Status: "taken", Color: "#ff4d4f", URL: "https://example.com"},
+		{ID: 250250, Status: "taken", Color: "#36cfc9", URL: "https://minecraft.net"},
+		{ID: 750750, Status: "taken", Color: "#722ed1", URL: "https://github.com"},
+	}
+
+	for _, pixel := range demo {
+		if _, err := store.UpdatePixel(ctx, pixel); err != nil {
+			log.Printf("seed pixel %d: %v", pixel.ID, err)
+		}
+	}
 }
 
 func serveIndex(c *gin.Context) {

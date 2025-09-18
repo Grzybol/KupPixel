@@ -9,6 +9,7 @@ RUN npm run build
 
 FROM golang:1.21-alpine AS backend-builder
 WORKDIR /app
+RUN apk add --no-cache build-base sqlite-dev
 COPY backend ./backend
 COPY --from=frontend-builder /app/frontend/dist ./frontend_dist
 RUN set -eux; \
@@ -16,10 +17,11 @@ RUN set -eux; \
     mkdir -p backend/frontend_dist; \
     cp -r frontend_dist/. backend/frontend_dist/; \
     cd backend; \
-    CGO_ENABLED=0 GOOS=linux go build -o kup-piksel ./...
+    CGO_ENABLED=1 GOOS=linux go build -o kup-piksel ./...
 
 FROM alpine:3.19
 WORKDIR /app
+RUN apk add --no-cache sqlite-libs
 COPY --from=backend-builder /app/backend/kup-piksel ./kup-piksel
 EXPOSE 3000
 CMD ["./kup-piksel"]

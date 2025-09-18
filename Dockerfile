@@ -17,7 +17,7 @@ RUN set -eux; \
     mkdir -p backend/frontend_dist; \
     cp -r frontend_dist/. backend/frontend_dist/; \
     cd backend; \
-    CGO_ENABLED=1 GOOS=linux go build -o kup-piksel ./...
+    CGO_ENABLED=1 GOOS=linux go build -o kup-piksel .
 
 FROM alpine:3.19
 WORKDIR /app

@@ -1,0 +1,8 @@
+node_modules
+frontend/node_modules
+backend/frontend_dist/*
+!backend/frontend_dist/index.html
+!backend/frontend_dist/.keep
+frontend/dist
+.env
+.DS_Store

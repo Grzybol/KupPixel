@@ -3,13 +3,13 @@ import { useAuth } from "../useAuth";
 
 export default function LoginModal() {
   const { isLoginModalOpen, closeLoginModal, login, loginPrompt } = useAuth();
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const resetState = useCallback(() => {
-    setUsername("");
+    setEmail("");
     setPassword("");
     setError(null);
     setIsSubmitting(false);
@@ -27,7 +27,7 @@ export default function LoginModal() {
       setError(null);
       setIsSubmitting(true);
       try {
-        await login({ username, password });
+        await login({ email, password });
         resetState();
       } catch (err) {
         console.error("login error", err);
@@ -37,7 +37,7 @@ export default function LoginModal() {
         setIsSubmitting(false);
       }
     },
-    [login, password, resetState, username]
+    [email, login, password, resetState]
   );
 
   if (!isLoginModalOpen) {
@@ -70,14 +70,14 @@ export default function LoginModal() {
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <label className="block text-sm font-medium text-slate-200">
-            Nazwa użytkownika
+            Adres e-mail
             <input
-              type="text"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
               className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-900/70 px-4 py-3 text-slate-100 shadow-inner focus:border-blue-400 focus:outline-none"
               autoFocus
-              autoComplete="username"
+              autoComplete="email"
               required
               disabled={isSubmitting}
             />

@@ -111,7 +111,7 @@ function LandingPage() {
           {user ? (
             <>
               <span className="rounded-full bg-slate-800/80 px-4 py-2 text-slate-200">
-                Zalogowano jako <span className="font-semibold">{user.username}</span>
+                Zalogowano jako <span className="font-semibold">{user.email}</span>
               </span>
               <button
                 type="button"

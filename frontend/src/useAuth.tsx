@@ -10,12 +10,12 @@ import {
 } from "react";
 
 export type AuthUser = {
-  username: string;
+  email: string;
   [key: string]: unknown;
 };
 
 type LoginCredentials = {
-  username: string;
+  email: string;
   password: string;
 };
 
@@ -42,12 +42,12 @@ function parseUser(data: unknown): AuthUser | null {
   if (!data || typeof data !== "object") {
     return null;
   }
-  if ("username" in data && typeof (data as Record<string, unknown>).username === "string") {
+  if ("email" in data && typeof (data as Record<string, unknown>).email === "string") {
     return data as AuthUser;
   }
   if ("user" in data && typeof (data as Record<string, unknown>).user === "object") {
     const nested = (data as Record<string, unknown>).user as Record<string, unknown>;
-    if (typeof nested.username === "string") {
+    if (typeof nested.email === "string") {
       return nested as AuthUser;
     }
   }
@@ -138,7 +138,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
           "Content-Type": "application/json",
         },
         credentials: "include",
-        body: JSON.stringify(credentials),
+        body: JSON.stringify({
+          email: credentials.email,
+          password: credentials.password,
+        }),
       });
       if (!response.ok) {
         const message = await response.text().catch(() => "");

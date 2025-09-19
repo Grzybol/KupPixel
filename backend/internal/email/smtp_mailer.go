@@ -23,7 +23,8 @@ type SMTPConfig struct {
 	FromName  string
 }
 
-func (c *SMTPConfig) sanitize() {
+// Sanitize trims whitespace from configuration fields and applies defaults.
+func (c *SMTPConfig) Sanitize() {
 	c.Host = strings.TrimSpace(c.Host)
 	c.Username = strings.TrimSpace(c.Username)
 	c.Password = strings.TrimSpace(c.Password)
@@ -94,7 +95,7 @@ func LoadSMTPConfigFromEnv(getenv func(string) string) (*SMTPConfig, error) {
 		FromEmail: fromEmail,
 		FromName:  fromName,
 	}
-	cfg.sanitize()
+	cfg.Sanitize()
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -112,7 +113,7 @@ type SMTPMailer struct {
 
 // NewSMTPMailer constructs a Mailer using real SMTP transport.
 func NewSMTPMailer(cfg SMTPConfig) (*SMTPMailer, error) {
-	cfg.sanitize()
+	cfg.Sanitize()
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}

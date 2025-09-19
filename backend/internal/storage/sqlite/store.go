@@ -28,6 +28,14 @@ type Pixel struct {
 	Color     string    `json:"color,omitempty"`
 	URL       string    `json:"url,omitempty"`
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	OwnerID   *int      `json:"owner_id,omitempty"`
+}
+
+type User struct {
+	ID           int64
+	Username     string
+	PasswordHash string
+	CreatedAt    time.Time
 }
 
 type PixelState struct {
@@ -73,14 +81,30 @@ func (s *Store) EnsureSchema(ctx context.Context) (err error) {
 		}
 	}()
 
+	if _, execErr := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`); execErr != nil {
+		err = fmt.Errorf("create users table: %w", execErr)
+		return err
+	}
+
 	if _, execErr := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS pixels (
                 id INTEGER PRIMARY KEY,
                 status TEXT,
                 color TEXT,
                 url TEXT,
-                updated_at TIMESTAMP
+                updated_at TIMESTAMP,
+                owner_id INTEGER,
+                FOREIGN KEY(owner_id) REFERENCES users(id)
         )`); execErr != nil {
 		err = fmt.Errorf("create pixels table: %w", execErr)
+		return err
+	}
+
+	if err = ensurePixelOwnerColumn(ctx, tx); err != nil {
 		return err
 	}
 
@@ -101,7 +125,7 @@ func (s *Store) EnsureSchema(ctx context.Context) (err error) {
 				err = ctx.Err()
 				return err
 			}
-			query := fmt.Sprintf("INSERT OR IGNORE INTO pixels(id, status, color, url, updated_at) VALUES (%d, 'free', '', '', CURRENT_TIMESTAMP)", i)
+			query := fmt.Sprintf("INSERT OR IGNORE INTO pixels(id, status, color, url, updated_at, owner_id) VALUES (%d, 'free', '', '', CURRENT_TIMESTAMP, NULL)", i)
 			if _, execErr := tx.ExecContext(ctx, query); execErr != nil {
 				err = fmt.Errorf("fill pixels: %w", execErr)
 				return err
@@ -136,7 +160,7 @@ func parseUpdatedAt(value string) (time.Time, error) {
 }
 
 func (s *Store) GetAllPixels(ctx context.Context) (PixelState, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, status, COALESCE(color, ''), COALESCE(url, ''), updated_at FROM pixels ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, status, COALESCE(color, ''), COALESCE(url, ''), updated_at, owner_id FROM pixels ORDER BY id`)
 	if err != nil {
 		return PixelState{}, fmt.Errorf("query pixels: %w", err)
 	}
@@ -146,7 +170,8 @@ func (s *Store) GetAllPixels(ctx context.Context) (PixelState, error) {
 	for rows.Next() {
 		var pixel Pixel
 		var updated sql.NullString
-		if err := rows.Scan(&pixel.ID, &pixel.Status, &pixel.Color, &pixel.URL, &updated); err != nil {
+		var owner sql.NullInt64
+		if err := rows.Scan(&pixel.ID, &pixel.Status, &pixel.Color, &pixel.URL, &updated, &owner); err != nil {
 			return PixelState{}, fmt.Errorf("scan pixel: %w", err)
 		}
 		if updated.Valid {
@@ -155,6 +180,10 @@ func (s *Store) GetAllPixels(ctx context.Context) (PixelState, error) {
 				return PixelState{}, fmt.Errorf("parse pixel %d updated_at: %w", pixel.ID, err)
 			}
 			pixel.UpdatedAt = parsed
+		}
+		if owner.Valid {
+			id := int(owner.Int64)
+			pixel.OwnerID = &id
 		}
 		pixels = append(pixels, pixel)
 	}
@@ -171,7 +200,7 @@ func (s *Store) UpdatePixel(ctx context.Context, pixel Pixel) (updated Pixel, er
 		return Pixel{}, fmt.Errorf("invalid pixel id: %d", pixel.ID)
 	}
 
-	updated = Pixel{ID: pixel.ID}
+	updated = Pixel{ID: pixel.ID, OwnerID: pixel.OwnerID}
 	if strings.EqualFold(pixel.Status, "taken") {
 		if pixel.Color == "" || pixel.URL == "" {
 			return Pixel{}, errors.New("taken pixels require color and url")
@@ -181,6 +210,9 @@ func (s *Store) UpdatePixel(ctx context.Context, pixel Pixel) (updated Pixel, er
 		updated.URL = pixel.URL
 	} else {
 		updated.Status = "free"
+		updated.Color = ""
+		updated.URL = ""
+		updated.OwnerID = nil
 	}
 
 	updated.UpdatedAt = time.Now().UTC()
@@ -195,12 +227,18 @@ func (s *Store) UpdatePixel(ctx context.Context, pixel Pixel) (updated Pixel, er
 		}
 	}()
 
+	ownerValue := "NULL"
+	if updated.OwnerID != nil {
+		ownerValue = fmt.Sprintf("%d", *updated.OwnerID)
+	}
+
 	query := fmt.Sprintf(
-		"UPDATE pixels SET status = %s, color = %s, url = %s, updated_at = %s WHERE id = %d",
+		"UPDATE pixels SET status = %s, color = %s, url = %s, updated_at = %s, owner_id = %s WHERE id = %d",
 		quoteLiteral(updated.Status),
 		quoteLiteral(updated.Color),
 		quoteLiteral(updated.URL),
 		quoteLiteral(updated.UpdatedAt.Format(time.RFC3339Nano)),
+		ownerValue,
 		updated.ID,
 	)
 
@@ -227,4 +265,182 @@ func (s *Store) UpdatePixel(ctx context.Context, pixel Pixel) (updated Pixel, er
 func quoteLiteral(value string) string {
 	escaped := strings.ReplaceAll(value, "'", "''")
 	return "'" + escaped + "'"
+}
+
+func ensurePixelOwnerColumn(ctx context.Context, tx *sql.Tx) error {
+	hasColumn, err := tableHasColumn(ctx, tx, "pixels", "owner_id")
+	if err != nil {
+		return err
+	}
+	if hasColumn {
+		return nil
+	}
+
+	if _, execErr := tx.ExecContext(ctx, `ALTER TABLE pixels ADD COLUMN owner_id INTEGER`); execErr != nil {
+		return fmt.Errorf("add owner_id column: %w", execErr)
+	}
+	return nil
+}
+
+func tableHasColumn(ctx context.Context, tx *sql.Tx, table, column string) (bool, error) {
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, fmt.Errorf("pragma table_info %s: %w", table, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType string
+			notNull    int
+			defaultVal sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &pk); err != nil {
+			return false, fmt.Errorf("scan table info %s: %w", table, err)
+		}
+		if strings.EqualFold(name, column) {
+			return true, nil
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("iterate table info %s: %w", table, err)
+	}
+
+	return false, nil
+}
+
+func (s *Store) CreateUser(ctx context.Context, username, passwordHash string) (User, error) {
+	if strings.TrimSpace(username) == "" {
+		return User{}, errors.New("username must not be empty")
+	}
+	if passwordHash == "" {
+		return User{}, errors.New("password hash must not be empty")
+	}
+
+	query := fmt.Sprintf(
+		"INSERT INTO users(username, password_hash) VALUES (%s, %s)",
+		quoteLiteral(username),
+		quoteLiteral(passwordHash),
+	)
+
+	res, err := s.db.ExecContext(ctx, query)
+	if err != nil {
+		return User{}, fmt.Errorf("create user: %w", err)
+	}
+
+	id, err := res.LastInsertId()
+	if err != nil {
+		return User{}, fmt.Errorf("user id: %w", err)
+	}
+
+	user, err := s.GetUserByUsername(ctx, username)
+	if err != nil {
+		return User{}, err
+	}
+	user.ID = id
+	return user, nil
+}
+
+func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, error) {
+	if strings.TrimSpace(username) == "" {
+		return User{}, errors.New("username must not be empty")
+	}
+
+	query := fmt.Sprintf(
+		"SELECT id, username, password_hash, created_at FROM users WHERE username = %s",
+		quoteLiteral(username),
+	)
+	row := s.db.QueryRowContext(ctx, query)
+
+	var (
+		user      User
+		createdAt string
+	)
+	if err := row.Scan(&user.ID, &user.Username, &user.PasswordHash, &createdAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return User{}, err
+		}
+		return User{}, fmt.Errorf("get user by username: %w", err)
+	}
+
+	parsed, err := parseUpdatedAt(createdAt)
+	if err != nil {
+		return User{}, fmt.Errorf("parse user created_at: %w", err)
+	}
+	user.CreatedAt = parsed
+	return user, nil
+}
+
+func (s *Store) AssignPixelToUser(ctx context.Context, pixelID int, userID int64) error {
+	if pixelID < 0 || pixelID >= TotalPixels {
+		return fmt.Errorf("invalid pixel id: %d", pixelID)
+	}
+	query := fmt.Sprintf(
+		"UPDATE pixels SET owner_id = %d, status = %s, updated_at = %s WHERE id = %d",
+		userID,
+		quoteLiteral("taken"),
+		quoteLiteral(time.Now().UTC().Format(time.RFC3339Nano)),
+		pixelID,
+	)
+
+	res, err := s.db.ExecContext(ctx, query)
+	if err != nil {
+		return fmt.Errorf("assign pixel to user: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("assign pixel rows affected: %w", err)
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Store) ListUserPixels(ctx context.Context, userID int64) ([]Pixel, error) {
+	query := fmt.Sprintf(
+		"SELECT id, status, COALESCE(color, ''), COALESCE(url, ''), updated_at, owner_id FROM pixels WHERE owner_id = %d ORDER BY id",
+		userID,
+	)
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("list user pixels: %w", err)
+	}
+	defer rows.Close()
+
+	var pixels []Pixel
+	for rows.Next() {
+		var (
+			pixel   Pixel
+			updated sql.NullString
+			owner   sql.NullInt64
+		)
+		if err := rows.Scan(&pixel.ID, &pixel.Status, &pixel.Color, &pixel.URL, &updated, &owner); err != nil {
+			return nil, fmt.Errorf("scan user pixel: %w", err)
+		}
+		if updated.Valid {
+			parsed, err := parseUpdatedAt(updated.String)
+			if err != nil {
+				return nil, fmt.Errorf("parse user pixel %d updated_at: %w", pixel.ID, err)
+			}
+			pixel.UpdatedAt = parsed
+		}
+		if owner.Valid {
+			oid := int(owner.Int64)
+			pixel.OwnerID = &oid
+		}
+		pixels = append(pixels, pixel)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate user pixels: %w", err)
+	}
+
+	return pixels, nil
 }

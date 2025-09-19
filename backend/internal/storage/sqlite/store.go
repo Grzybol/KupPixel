@@ -27,8 +27,20 @@ type Pixel struct {
 	Status    string    `json:"status"`
 	Color     string    `json:"color,omitempty"`
 	URL       string    `json:"url,omitempty"`
+	OwnerID   *int64    `json:"owner_id,omitempty"`
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
+
+type User struct {
+	ID           int64     `json:"id"`
+	Email        string    `json:"email"`
+	PasswordHash string    `json:"-"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+var (
+	ErrPixelOwnedByAnotherUser = errors.New("pixel owned by another user")
+)
 
 type PixelState struct {
 	Width  int     `json:"width"`
@@ -78,6 +90,7 @@ func (s *Store) EnsureSchema(ctx context.Context) (err error) {
                 status TEXT,
                 color TEXT,
                 url TEXT,
+                owner_id INTEGER,
                 updated_at TIMESTAMP
         )`); execErr != nil {
 		err = fmt.Errorf("create pixels table: %w", execErr)
@@ -87,6 +100,21 @@ func (s *Store) EnsureSchema(ctx context.Context) (err error) {
 	if _, execErr := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_pixels_status ON pixels(status)`); execErr != nil {
 		err = fmt.Errorf("create status index: %w", execErr)
 		return err
+	}
+
+	if _, execErr := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`); execErr != nil {
+		err = fmt.Errorf("create users table: %w", execErr)
+		return err
+	}
+
+	// Attempt to add missing owner_id column for existing databases. Ignore errors if it already exists.
+	if _, execErr := tx.ExecContext(ctx, `ALTER TABLE pixels ADD COLUMN owner_id INTEGER`); execErr != nil {
+		// ignore error to keep compatibility with fresh schema
 	}
 
 	var count int
@@ -101,7 +129,7 @@ func (s *Store) EnsureSchema(ctx context.Context) (err error) {
 				err = ctx.Err()
 				return err
 			}
-			query := fmt.Sprintf("INSERT OR IGNORE INTO pixels(id, status, color, url, updated_at) VALUES (%d, 'free', '', '', CURRENT_TIMESTAMP)", i)
+			query := fmt.Sprintf("INSERT OR IGNORE INTO pixels(id, status, color, url, owner_id, updated_at) VALUES (%d, 'free', '', '', NULL, CURRENT_TIMESTAMP)", i)
 			if _, execErr := tx.ExecContext(ctx, query); execErr != nil {
 				err = fmt.Errorf("fill pixels: %w", execErr)
 				return err
@@ -136,7 +164,7 @@ func parseUpdatedAt(value string) (time.Time, error) {
 }
 
 func (s *Store) GetAllPixels(ctx context.Context) (PixelState, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, status, COALESCE(color, ''), COALESCE(url, ''), updated_at FROM pixels ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, status, COALESCE(color, ''), COALESCE(url, ''), owner_id, updated_at FROM pixels ORDER BY id`)
 	if err != nil {
 		return PixelState{}, fmt.Errorf("query pixels: %w", err)
 	}
@@ -145,9 +173,14 @@ func (s *Store) GetAllPixels(ctx context.Context) (PixelState, error) {
 	pixels := make([]Pixel, 0, TotalPixels)
 	for rows.Next() {
 		var pixel Pixel
+		var owner sql.NullInt64
 		var updated sql.NullString
-		if err := rows.Scan(&pixel.ID, &pixel.Status, &pixel.Color, &pixel.URL, &updated); err != nil {
+		if err := rows.Scan(&pixel.ID, &pixel.Status, &pixel.Color, &pixel.URL, &owner, &updated); err != nil {
 			return PixelState{}, fmt.Errorf("scan pixel: %w", err)
+		}
+		if owner.Valid {
+			ownerID := owner.Int64
+			pixel.OwnerID = &ownerID
 		}
 		if updated.Valid {
 			parsed, err := parseUpdatedAt(updated.String)
@@ -179,8 +212,12 @@ func (s *Store) UpdatePixel(ctx context.Context, pixel Pixel) (updated Pixel, er
 		updated.Status = "taken"
 		updated.Color = pixel.Color
 		updated.URL = pixel.URL
+		updated.OwnerID = pixel.OwnerID
 	} else {
 		updated.Status = "free"
+		updated.Color = ""
+		updated.URL = ""
+		updated.OwnerID = nil
 	}
 
 	updated.UpdatedAt = time.Now().UTC()
@@ -195,11 +232,19 @@ func (s *Store) UpdatePixel(ctx context.Context, pixel Pixel) (updated Pixel, er
 		}
 	}()
 
+	var ownerValue string
+	if updated.OwnerID != nil {
+		ownerValue = fmt.Sprintf("%d", *updated.OwnerID)
+	} else {
+		ownerValue = "NULL"
+	}
+
 	query := fmt.Sprintf(
-		"UPDATE pixels SET status = %s, color = %s, url = %s, updated_at = %s WHERE id = %d",
+		"UPDATE pixels SET status = %s, color = %s, url = %s, owner_id = %s, updated_at = %s WHERE id = %d",
 		quoteLiteral(updated.Status),
 		quoteLiteral(updated.Color),
 		quoteLiteral(updated.URL),
+		ownerValue,
 		quoteLiteral(updated.UpdatedAt.Format(time.RFC3339Nano)),
 		updated.ID,
 	)
@@ -222,6 +267,183 @@ func (s *Store) UpdatePixel(ctx context.Context, pixel Pixel) (updated Pixel, er
 	}
 
 	return updated, nil
+}
+
+func (s *Store) UpdatePixelForUser(ctx context.Context, userID int64, pixel Pixel) (Pixel, error) {
+	if userID <= 0 {
+		return Pixel{}, errors.New("invalid user id")
+	}
+	if pixel.ID < 0 || pixel.ID >= TotalPixels {
+		return Pixel{}, fmt.Errorf("invalid pixel id: %d", pixel.ID)
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Pixel{}, fmt.Errorf("begin update pixel for user: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	query := fmt.Sprintf("SELECT owner_id FROM pixels WHERE id = %d", pixel.ID)
+	row := tx.QueryRowContext(ctx, query)
+	var currentOwner sql.NullInt64
+	if err := row.Scan(&currentOwner); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Pixel{}, sql.ErrNoRows
+		}
+		return Pixel{}, fmt.Errorf("load current pixel state: %w", err)
+	}
+
+	updated := Pixel{ID: pixel.ID}
+
+	if strings.EqualFold(pixel.Status, "taken") {
+		if pixel.Color == "" || pixel.URL == "" {
+			return Pixel{}, errors.New("taken pixels require color and url")
+		}
+		if currentOwner.Valid && currentOwner.Int64 != userID {
+			return Pixel{}, ErrPixelOwnedByAnotherUser
+		}
+		updated.Status = "taken"
+		updated.Color = pixel.Color
+		updated.URL = pixel.URL
+		owner := userID
+		updated.OwnerID = &owner
+	} else {
+		if currentOwner.Valid && currentOwner.Int64 != userID {
+			return Pixel{}, ErrPixelOwnedByAnotherUser
+		}
+		updated.Status = "free"
+		updated.Color = ""
+		updated.URL = ""
+		updated.OwnerID = nil
+	}
+
+	updated.UpdatedAt = time.Now().UTC()
+
+	var ownerValue string
+	if updated.OwnerID != nil {
+		ownerValue = fmt.Sprintf("%d", *updated.OwnerID)
+	} else {
+		ownerValue = "NULL"
+	}
+
+	updateQuery := fmt.Sprintf(
+		"UPDATE pixels SET status = %s, color = %s, url = %s, owner_id = %s, updated_at = %s WHERE id = %d",
+		quoteLiteral(updated.Status),
+		quoteLiteral(updated.Color),
+		quoteLiteral(updated.URL),
+		ownerValue,
+		quoteLiteral(updated.UpdatedAt.Format(time.RFC3339Nano)),
+		updated.ID,
+	)
+
+	res, err := tx.ExecContext(ctx, updateQuery)
+	if err != nil {
+		return Pixel{}, fmt.Errorf("update pixel for user: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return Pixel{}, fmt.Errorf("rows affected: %w", err)
+	}
+	if affected == 0 {
+		return Pixel{}, sql.ErrNoRows
+	}
+
+	if err = tx.Commit(); err != nil {
+		return Pixel{}, fmt.Errorf("commit update pixel for user: %w", err)
+	}
+
+	return updated, nil
+}
+
+func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (User, error) {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return User{}, errors.New("email must not be empty")
+	}
+	if passwordHash == "" {
+		return User{}, errors.New("password hash must not be empty")
+	}
+
+	query := fmt.Sprintf(
+		"INSERT INTO users(email, password_hash, created_at) VALUES (%s, %s, %s)",
+		quoteLiteral(email),
+		quoteLiteral(passwordHash),
+		"CURRENT_TIMESTAMP",
+	)
+
+	res, err := s.db.ExecContext(ctx, query)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return User{}, fmt.Errorf("email already exists: %w", err)
+		}
+		return User{}, fmt.Errorf("insert user: %w", err)
+	}
+
+	id, err := res.LastInsertId()
+	if err != nil {
+		return User{}, fmt.Errorf("last insert id: %w", err)
+	}
+
+	user := User{ID: id, Email: email, PasswordHash: passwordHash, CreatedAt: time.Now().UTC()}
+	return user, nil
+}
+
+func (s *Store) GetUserByEmail(ctx context.Context, email string) (User, error) {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return User{}, errors.New("email must not be empty")
+	}
+
+	query := fmt.Sprintf(
+		"SELECT id, email, password_hash, created_at FROM users WHERE email = %s",
+		quoteLiteral(email),
+	)
+
+	row := s.db.QueryRowContext(ctx, query)
+	var user User
+	var created string
+	if err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &created); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return User{}, sql.ErrNoRows
+		}
+		return User{}, fmt.Errorf("scan user by email: %w", err)
+	}
+
+	parsed, err := parseUpdatedAt(created)
+	if err != nil {
+		return User{}, fmt.Errorf("parse created_at: %w", err)
+	}
+	user.CreatedAt = parsed
+	return user, nil
+}
+
+func (s *Store) GetUserByID(ctx context.Context, id int64) (User, error) {
+	if id <= 0 {
+		return User{}, errors.New("invalid user id")
+	}
+
+	query := fmt.Sprintf("SELECT id, email, password_hash, created_at FROM users WHERE id = %d", id)
+	row := s.db.QueryRowContext(ctx, query)
+	var user User
+	var created string
+	if err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &created); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return User{}, sql.ErrNoRows
+		}
+		return User{}, fmt.Errorf("scan user by id: %w", err)
+	}
+
+	parsed, err := parseUpdatedAt(created)
+	if err != nil {
+		return User{}, fmt.Errorf("parse created_at: %w", err)
+	}
+	user.CreatedAt = parsed
+	return user, nil
 }
 
 func quoteLiteral(value string) string {

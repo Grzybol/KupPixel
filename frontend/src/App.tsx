@@ -1,4 +1,4 @@
-import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import PixelCanvas, { Pixel } from "./components/PixelCanvas";
 
@@ -113,43 +113,54 @@ function BuyPixelPage() {
   const [selectedColor, setSelectedColor] = useState("#ff4d4f");
   const [isProcessing, setIsProcessing] = useState(false);
   const [purchaseStatus, setPurchaseStatus] = useState<null | "success">(null);
-  const timeoutRef = useRef<number | null>(null);
+  const [purchaseError, setPurchaseError] = useState<string | null>(null);
+  const [url, setUrl] = useState("https://example.com");
 
   useEffect(() => {
-    if (timeoutRef.current) {
-      window.clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
     setSelectedColor("#ff4d4f");
     setIsProcessing(false);
     setPurchaseStatus(null);
+    setPurchaseError(null);
+    setUrl("https://example.com");
   }, [id]);
 
   const handleColorChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     setSelectedColor(event.target.value);
   }, []);
 
-  const handleSimulatePurchase = useCallback(() => {
-    if (timeoutRef.current) {
-      window.clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
-    setIsProcessing(true);
-    setPurchaseStatus(null);
-    timeoutRef.current = window.setTimeout(() => {
-      setIsProcessing(false);
-      setPurchaseStatus("success");
-      timeoutRef.current = null;
-    }, 1200);
+  const handleUrlChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    setUrl(event.target.value);
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (timeoutRef.current) {
-        window.clearTimeout(timeoutRef.current);
+  const handleSimulatePurchase = useCallback(async () => {
+    if (id === null) return;
+
+    setIsProcessing(true);
+    setPurchaseStatus(null);
+    setPurchaseError(null);
+
+    try {
+      const response = await fetch("/api/pixels", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ id, status: "taken", color: selectedColor, url }),
+      });
+
+      if (!response.ok) {
+        const message = await response.text().catch(() => null);
+        throw new Error(message || `Błąd API: ${response.status}`);
       }
-    };
-  }, []);
+
+      setPurchaseStatus("success");
+    } catch (error) {
+      console.error(error);
+      setPurchaseError("Nie udało się zarezerwować piksela. Spróbuj ponownie.");
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [id, selectedColor, url]);
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center px-6 py-12 text-center">
@@ -194,6 +205,22 @@ function BuyPixelPage() {
             </div>
           </div>
 
+          <label className="mt-6 flex flex-col gap-2 text-sm font-medium text-slate-200" htmlFor="pixel-url">
+            Adres URL reklamy
+            <input
+              id="pixel-url"
+              type="url"
+              value={url}
+              onChange={handleUrlChange}
+              disabled={isProcessing}
+              placeholder="https://twoja-domena.pl"
+              className="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-4 py-3 text-sm text-slate-100 shadow-inner placeholder:text-slate-500"
+            />
+            <span className="text-xs font-normal text-slate-400">
+              Po kliknięciu w piksel użytkownik zostanie przekierowany pod ten adres.
+            </span>
+          </label>
+
           <button
             type="button"
             onClick={handleSimulatePurchase}
@@ -215,6 +242,12 @@ function BuyPixelPage() {
               ? "Trwa wirtualne potwierdzanie płatności. To potrwa tylko chwilkę..."
               : "Symulacja nie pobiera prawdziwych środków – to jedynie podgląd przyszłego doświadczenia."}
           </p>
+
+          {purchaseError && (
+            <p role="alert" className="mt-4 text-sm text-rose-400">
+              {purchaseError}
+            </p>
+          )}
         </div>
 
         {purchaseStatus === "success" && (

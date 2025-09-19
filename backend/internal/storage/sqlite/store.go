@@ -32,10 +32,19 @@ type Pixel struct {
 }
 
 type User struct {
-	ID           int64     `json:"id"`
-	Email        string    `json:"email"`
-	PasswordHash string    `json:"-"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID           int64      `json:"id"`
+	Email        string     `json:"email"`
+	PasswordHash string     `json:"-"`
+	CreatedAt    time.Time  `json:"created_at"`
+	IsVerified   bool       `json:"is_verified"`
+	VerifiedAt   *time.Time `json:"verified_at,omitempty"`
+}
+
+type VerificationToken struct {
+	Token     string    `json:"token"`
+	UserID    int64     `json:"user_id"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 var (
@@ -106,9 +115,35 @@ func (s *Store) EnsureSchema(ctx context.Context) (err error) {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 email TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
-                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                is_verified INTEGER NOT NULL DEFAULT 0,
+                verified_at TIMESTAMP
         )`); execErr != nil {
 		err = fmt.Errorf("create users table: %w", execErr)
+		return err
+	}
+
+	if _, execErr := tx.ExecContext(ctx, `ALTER TABLE users ADD COLUMN is_verified INTEGER NOT NULL DEFAULT 0`); execErr != nil {
+		// ignore - column may already exist
+	}
+
+	if _, execErr := tx.ExecContext(ctx, `ALTER TABLE users ADD COLUMN verified_at TIMESTAMP`); execErr != nil {
+		// ignore - column may already exist
+	}
+
+	if _, execErr := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS verification_tokens (
+                token TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        )`); execErr != nil {
+		err = fmt.Errorf("create verification_tokens table: %w", execErr)
+		return err
+	}
+
+	if _, execErr := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_verification_tokens_user ON verification_tokens(user_id)`); execErr != nil {
+		err = fmt.Errorf("create verification token index: %w", execErr)
 		return err
 	}
 
@@ -370,7 +405,7 @@ func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (Use
 	}
 
 	query := fmt.Sprintf(
-		"INSERT INTO users(email, password_hash, created_at) VALUES (%s, %s, %s)",
+		"INSERT INTO users(email, password_hash, created_at, is_verified) VALUES (%s, %s, %s, 0)",
 		quoteLiteral(email),
 		quoteLiteral(passwordHash),
 		"CURRENT_TIMESTAMP",
@@ -389,7 +424,7 @@ func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (Use
 		return User{}, fmt.Errorf("last insert id: %w", err)
 	}
 
-	user := User{ID: id, Email: email, PasswordHash: passwordHash, CreatedAt: time.Now().UTC()}
+	user := User{ID: id, Email: email, PasswordHash: passwordHash, CreatedAt: time.Now().UTC(), IsVerified: false}
 	return user, nil
 }
 
@@ -400,14 +435,16 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (User, error) 
 	}
 
 	query := fmt.Sprintf(
-		"SELECT id, email, password_hash, created_at FROM users WHERE email = %s",
+		"SELECT id, email, password_hash, created_at, is_verified, verified_at FROM users WHERE email = %s",
 		quoteLiteral(email),
 	)
 
 	row := s.db.QueryRowContext(ctx, query)
 	var user User
 	var created string
-	if err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &created); err != nil {
+	var isVerified int64
+	var verified sql.NullString
+	if err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &created, &isVerified, &verified); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, sql.ErrNoRows
 		}
@@ -419,6 +456,14 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (User, error) 
 		return User{}, fmt.Errorf("parse created_at: %w", err)
 	}
 	user.CreatedAt = parsed
+	user.IsVerified = isVerified != 0
+	if verified.Valid && strings.TrimSpace(verified.String) != "" {
+		parsedVerified, parseErr := parseUpdatedAt(verified.String)
+		if parseErr != nil {
+			return User{}, fmt.Errorf("parse verified_at: %w", parseErr)
+		}
+		user.VerifiedAt = &parsedVerified
+	}
 	return user, nil
 }
 
@@ -427,11 +472,13 @@ func (s *Store) GetUserByID(ctx context.Context, id int64) (User, error) {
 		return User{}, errors.New("invalid user id")
 	}
 
-	query := fmt.Sprintf("SELECT id, email, password_hash, created_at FROM users WHERE id = %d", id)
+	query := fmt.Sprintf("SELECT id, email, password_hash, created_at, is_verified, verified_at FROM users WHERE id = %d", id)
 	row := s.db.QueryRowContext(ctx, query)
 	var user User
 	var created string
-	if err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &created); err != nil {
+	var isVerified int64
+	var verified sql.NullString
+	if err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &created, &isVerified, &verified); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, sql.ErrNoRows
 		}
@@ -443,7 +490,132 @@ func (s *Store) GetUserByID(ctx context.Context, id int64) (User, error) {
 		return User{}, fmt.Errorf("parse created_at: %w", err)
 	}
 	user.CreatedAt = parsed
+	user.IsVerified = isVerified != 0
+	if verified.Valid && strings.TrimSpace(verified.String) != "" {
+		parsedVerified, parseErr := parseUpdatedAt(verified.String)
+		if parseErr != nil {
+			return User{}, fmt.Errorf("parse verified_at: %w", parseErr)
+		}
+		user.VerifiedAt = &parsedVerified
+	}
 	return user, nil
+}
+
+func (s *Store) CreateVerificationToken(ctx context.Context, token string, userID int64, expiresAt time.Time) (VerificationToken, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return VerificationToken{}, errors.New("token must not be empty")
+	}
+	if userID <= 0 {
+		return VerificationToken{}, errors.New("invalid user id")
+	}
+
+	created := time.Now().UTC()
+	query := fmt.Sprintf(
+		"INSERT INTO verification_tokens(token, user_id, expires_at, created_at) VALUES (%s, %d, %s, %s)",
+		quoteLiteral(token),
+		userID,
+		quoteLiteral(expiresAt.UTC().Format(time.RFC3339Nano)),
+		quoteLiteral(created.Format(time.RFC3339Nano)),
+	)
+
+	if _, err := s.db.ExecContext(ctx, query); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return VerificationToken{}, fmt.Errorf("token already exists: %w", err)
+		}
+		return VerificationToken{}, fmt.Errorf("insert verification token: %w", err)
+	}
+
+	return VerificationToken{Token: token, UserID: userID, ExpiresAt: expiresAt.UTC(), CreatedAt: created}, nil
+}
+
+func (s *Store) GetVerificationToken(ctx context.Context, token string) (VerificationToken, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return VerificationToken{}, errors.New("token must not be empty")
+	}
+
+	query := fmt.Sprintf(
+		"SELECT token, user_id, expires_at, created_at FROM verification_tokens WHERE token = %s",
+		quoteLiteral(token),
+	)
+
+	row := s.db.QueryRowContext(ctx, query)
+	var vt VerificationToken
+	var expires string
+	var created string
+	if err := row.Scan(&vt.Token, &vt.UserID, &expires, &created); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return VerificationToken{}, sql.ErrNoRows
+		}
+		return VerificationToken{}, fmt.Errorf("scan verification token: %w", err)
+	}
+
+	parsedExpires, err := parseUpdatedAt(expires)
+	if err != nil {
+		return VerificationToken{}, fmt.Errorf("parse expires_at: %w", err)
+	}
+	vt.ExpiresAt = parsedExpires
+
+	parsedCreated, err := parseUpdatedAt(created)
+	if err != nil {
+		return VerificationToken{}, fmt.Errorf("parse created_at: %w", err)
+	}
+	vt.CreatedAt = parsedCreated
+
+	return vt, nil
+}
+
+func (s *Store) DeleteVerificationToken(ctx context.Context, token string) error {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return errors.New("token must not be empty")
+	}
+
+	query := fmt.Sprintf("DELETE FROM verification_tokens WHERE token = %s", quoteLiteral(token))
+	if _, err := s.db.ExecContext(ctx, query); err != nil {
+		return fmt.Errorf("delete verification token: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) DeleteVerificationTokensForUser(ctx context.Context, userID int64) error {
+	if userID <= 0 {
+		return errors.New("invalid user id")
+	}
+
+	query := fmt.Sprintf("DELETE FROM verification_tokens WHERE user_id = %d", userID)
+	if _, err := s.db.ExecContext(ctx, query); err != nil {
+		return fmt.Errorf("delete tokens for user: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) MarkUserVerified(ctx context.Context, userID int64) error {
+	if userID <= 0 {
+		return errors.New("invalid user id")
+	}
+
+	query := fmt.Sprintf(
+		"UPDATE users SET is_verified = 1, verified_at = %s WHERE id = %d",
+		quoteLiteral(time.Now().UTC().Format(time.RFC3339Nano)),
+		userID,
+	)
+
+	res, err := s.db.ExecContext(ctx, query)
+	if err != nil {
+		return fmt.Errorf("mark user verified: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected mark user verified: %w", err)
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+
+	return nil
 }
 
 func quoteLiteral(value string) string {

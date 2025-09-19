@@ -1,5 +1,6 @@
-import { FormEvent, useCallback, useState } from "react";
+import { FormEvent, useCallback, useMemo, useState } from "react";
 import { useAuth } from "../useAuth";
+import ResendVerificationForm from "./ResendVerificationForm";
 
 export default function LoginModal() {
   const { isLoginModalOpen, closeLoginModal, login, loginPrompt } = useAuth();
@@ -39,6 +40,12 @@ export default function LoginModal() {
     },
     [email, login, password, resetState]
   );
+
+  const showResend = useMemo(() => {
+    if (!error) return false;
+    const lower = error.toLowerCase();
+    return lower.includes("potwierdzone") || lower.includes("weryfik");
+  }, [error]);
 
   if (!isLoginModalOpen) {
     return null;
@@ -100,6 +107,12 @@ export default function LoginModal() {
             <p role="alert" className="text-sm text-rose-400">
               {error}
             </p>
+          )}
+          {showResend && (
+            <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-4 text-sm text-blue-100">
+              <p className="mb-3">Nie otrzymałeś wiadomości? Wyślij ponownie link weryfikacyjny.</p>
+              <ResendVerificationForm initialEmail={email} className="space-y-3" />
+            </div>
           )}
 
           <div className="flex items-center justify-end gap-3 pt-4">

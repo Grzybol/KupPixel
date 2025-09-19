@@ -10,7 +10,10 @@ import {
 } from "react";
 
 export type AuthUser = {
+  id?: number;
   email: string;
+  is_verified?: boolean;
+  verified_at?: string | null;
   [key: string]: unknown;
 };
 
@@ -24,6 +27,10 @@ type RegisterCredentials = {
   password: string;
 };
 
+type RegisterResult = {
+  message: string;
+};
+
 type OpenOptions = {
   message?: string;
 };
@@ -32,7 +39,7 @@ type AuthContextValue = {
   user: AuthUser | null;
   isLoading: boolean;
   login: (credentials: LoginCredentials) => Promise<void>;
-  register: (credentials: RegisterCredentials) => Promise<void>;
+  register: (credentials: RegisterCredentials) => Promise<RegisterResult>;
   logout: () => Promise<void>;
   refresh: () => Promise<AuthUser | null>;
   ensureAuthenticated: (options?: OpenOptions) => Promise<boolean>;
@@ -149,14 +156,19 @@ export function AuthProvider({ children }: PropsWithChildren) {
           password: credentials.password,
         }),
       });
+      const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        const message = await response.text().catch(() => "");
-        throw new Error(message || "Nie udało się zalogować. Spróbuj ponownie.");
+        const message =
+          (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).error === "string"
+            ? ((payload as Record<string, unknown>).error as string)
+            : null) || "Nie udało się zalogować. Spróbuj ponownie.";
+        throw new Error(message);
       }
-      await refresh().catch(() => {
-        // refresh already logs error and resets user; surface a more helpful message
-        throw new Error("Nie udało się odczytać informacji o sesji.");
-      });
+      const parsed = parseUser(payload);
+      if (!parsed) {
+        throw new Error("Nie udało się odczytać informacji o koncie.");
+      }
+      setUser(parsed);
       setIsLoginModalOpen(false);
       setLoginPrompt(null);
       if (loginResolverRef.current) {
@@ -164,11 +176,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
         loginResolverRef.current = null;
       }
     },
-    [refresh]
+    []
   );
 
   const register = useCallback(
-    async (credentials: RegisterCredentials) => {
+    async (credentials: RegisterCredentials): Promise<RegisterResult> => {
       const response = await fetch("/api/register", {
         method: "POST",
         headers: {
@@ -177,21 +189,26 @@ export function AuthProvider({ children }: PropsWithChildren) {
         credentials: "include",
         body: JSON.stringify(credentials),
       });
+      const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        const message = await response.text().catch(() => "");
-        throw new Error(message || "Nie udało się utworzyć konta. Spróbuj ponownie.");
+        const message =
+          (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).error === "string"
+            ? ((payload as Record<string, unknown>).error as string)
+            : null) || "Nie udało się utworzyć konta. Spróbuj ponownie.";
+        throw new Error(message);
       }
-      await refresh().catch(() => {
-        throw new Error("Nie udało się odczytać informacji o sesji.");
-      });
-      setIsLoginModalOpen(false);
-      setLoginPrompt(null);
+
+      const message =
+        payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).message === "string"
+          ? ((payload as Record<string, unknown>).message as string)
+          : "Konto zostało utworzone. Sprawdź skrzynkę e-mail.";
       if (loginResolverRef.current) {
-        loginResolverRef.current(true);
+        loginResolverRef.current(false);
         loginResolverRef.current = null;
       }
+      return { message };
     },
-    [refresh]
+    []
   );
 
   const logout = useCallback(async () => {

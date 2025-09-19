@@ -3,6 +3,7 @@ import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import PixelCanvas, { Pixel } from "./components/PixelCanvas";
 import LoginModal from "./components/LoginModal";
 import RegisterModal from "./components/RegisterModal";
+import VerifyAccountPage from "./components/VerifyAccountPage";
 import { useAuth } from "./useAuth";
 
 type PixelResponse = {
@@ -385,6 +386,7 @@ export default function App() {
     <>
       <Routes>
         <Route path="/" element={<LandingPage onOpenRegister={handleOpenRegister} />} />
+        <Route path="/verify" element={<VerifyAccountPage />} />
         <Route path="/buy/:pixelId" element={<BuyPixelPage />} />
         <Route
           path="*"

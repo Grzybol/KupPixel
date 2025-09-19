@@ -20,7 +20,7 @@ type Config struct {
 
 // Default returns the configuration used when no config file exists on disk yet.
 func Default() *Config {
-	return &Config{DisableVerificationEmail: true}
+	return &Config{DisableVerificationEmail: false}
 }
 
 // WriteFile writes the given configuration as prettified JSON to the provided path.

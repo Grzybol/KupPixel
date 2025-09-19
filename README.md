@@ -30,20 +30,18 @@ Każdy piksel można kliknąć, zobaczyć czy jest wolny czy zajęty i w przysz�
 - **Docker**: multi-stage build → jeden image z frontendem i backendem
 - **Nginx/Reverse Proxy**: opcjonalnie do hostingu na VPS + SSL
 
-### ✉️ Wysyłka e-maili
+### ✉️ Konfiguracja backendu
 
-Backend potrafi wysyłać realne wiadomości SMTP z linkami aktywacyjnymi. W środowisku deweloperskim, gdy konfiguracja SMTP nie jest ustawiona, serwer loguje treść wiadomości (ConsoleMailer). Aby aktywować transport SMTP ustaw poniższe zmienne środowiskowe:
+Backend odczytuje ustawienia z pliku `config.json` (domyślnie w katalogu `backend/`, ścieżkę można nadpisać zmienną `PIXEL_CONFIG_PATH`). Format pliku to JSON/JSON5 – możesz korzystać z komentarzy i końcowych przecinków. Przykładowy plik znajdziesz pod `backend/config.example.json`.
 
-| Zmienna | Opis |
+Kluczowe opcje:
+
+| Pole | Opis |
 | --- | --- |
-| `SMTP_HOST` | Adres serwera SMTP (np. `smtp.gmail.com`). |
-| `SMTP_PORT` | Port serwera SMTP (np. `587`). |
-| `SMTP_USERNAME` | Nazwa użytkownika konta SMTP (opcjonalna dla serwerów bez uwierzytelnienia, wymaga pary z hasłem). |
-| `SMTP_PASSWORD` | Hasło/APi key do konta SMTP. |
-| `SMTP_SENDER_EMAIL` | Adres nadawcy wiadomości (np. `noreply@twojadomena.pl`). |
-| `SMTP_SENDER_NAME` | (Opcjonalnie) nazwa wyświetlana nadawcy. Domyślnie `Kup Piksel`. |
+| `disableVerificationEmail` | Po ustawieniu na `true` nowi użytkownicy są automatycznie oznaczani jako zweryfikowani i nie są wysyłane żadne maile. |
+| `smtp` | (Opcjonalnie) konfiguracja transportu SMTP oparta na polach `host`, `port`, `username`, `password`, `fromEmail`, `fromName`. |
 
-Jeśli dowolna z wymaganych wartości (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SENDER_EMAIL`) jest pominięta, backend zapisze czytelny log i automatycznie wróci do trybu konsolowego.
+Jeżeli sekcja `smtp` jest pominięta lub pusta, backend pozostaje w trybie developerskim – link aktywacyjny pojawia się w logach (ConsoleMailer). Po poprawnym uzupełnieniu danych zostanie użyty prawdziwy serwer SMTP.
 
 ### 💾 Przechowywanie danych backendu
 

@@ -21,6 +21,7 @@ import (
 
 	gin "github.com/gin-gonic/gin"
 
+	"github.com/example/kup-piksel/internal/config"
 	"github.com/example/kup-piksel/internal/email"
 	"github.com/example/kup-piksel/internal/storage/sqlite"
 	"golang.org/x/crypto/bcrypt"
@@ -37,11 +38,12 @@ type UpdatePixelRequest struct {
 }
 
 type Server struct {
-	store                *sqlite.Store
-	sessions             *SessionManager
-	mailer               email.Mailer
-	verificationBaseURL  string
-	verificationTokenTTL time.Duration
+	store                    *sqlite.Store
+	sessions                 *SessionManager
+	mailer                   email.Mailer
+	verificationBaseURL      string
+	verificationTokenTTL     time.Duration
+	disableVerificationEmail bool
 }
 
 type SessionManager struct {
@@ -108,6 +110,7 @@ const (
 	sessionCookieMaxAge        = 7 * 24 * 60 * 60
 	defaultVerificationBaseURL = "http://localhost:3000"
 	defaultVerificationTTL     = 24 * time.Hour
+	defaultConfigPath          = "config.json"
 )
 
 func generateSessionID() (string, error) {
@@ -220,6 +223,16 @@ func (s *Server) requireUser(c *gin.Context) (sqlite.User, bool) {
 }
 
 func main() {
+	configPath := os.Getenv("PIXEL_CONFIG_PATH")
+	if configPath == "" {
+		configPath = defaultConfigPath
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		log.Fatalf("load config: %v", err)
+	}
+
 	dbPath := os.Getenv("PIXEL_DB_PATH")
 	if dbPath == "" {
 		dbPath = defaultDBPath
@@ -254,26 +267,24 @@ func main() {
 	}
 
 	var mailer email.Mailer = email.NewConsoleMailer("Kup Piksel")
-	if cfg, err := email.LoadSMTPConfigFromEnv(os.Getenv); err != nil {
-		log.Printf("smtp configuration invalid: %v", err)
-		log.Printf("falling back to console mailer")
-	} else if cfg != nil {
-		smtpMailer, err := email.NewSMTPMailer(*cfg)
+	if cfg.SMTP != nil {
+		smtpMailer, err := email.NewSMTPMailer(*cfg.SMTP)
 		if err != nil {
 			log.Printf("failed to initialise smtp mailer: %v", err)
 			log.Printf("falling back to console mailer")
 		} else {
 			mailer = smtpMailer
-			log.Printf("smtp mailer enabled for %s", cfg.Address())
+			log.Printf("smtp mailer enabled for %s", cfg.SMTP.Address())
 		}
 	}
 
 	server := &Server{
-		store:                store,
-		sessions:             NewSessionManager(),
-		mailer:               mailer,
-		verificationBaseURL:  verificationBaseURL,
-		verificationTokenTTL: defaultVerificationTTL,
+		store:                    store,
+		sessions:                 NewSessionManager(),
+		mailer:                   mailer,
+		verificationBaseURL:      verificationBaseURL,
+		verificationTokenTTL:     defaultVerificationTTL,
+		disableVerificationEmail: cfg.DisableVerificationEmail,
 	}
 
 	router.POST("/api/register", server.handleRegister)
@@ -339,6 +350,21 @@ func (s *Server) handleRegister(c *gin.Context) {
 		}
 		log.Printf("create user: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create user"})
+		return
+	}
+
+	if s.disableVerificationEmail {
+		if err := s.store.MarkUserVerified(c.Request.Context(), user.ID); err != nil {
+			log.Printf("auto-verify user: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify user"})
+			return
+		}
+		if err := s.store.DeleteVerificationTokensForUser(c.Request.Context(), user.ID); err != nil {
+			log.Printf("cleanup verification tokens after auto verify: %v", err)
+		}
+		c.JSON(http.StatusCreated, gin.H{
+			"message": "Konto zostało utworzone i jest już potwierdzone. Możesz się zalogować.",
+		})
 		return
 	}
 
@@ -414,6 +440,9 @@ func (s *Server) handleLogin(c *gin.Context) {
 }
 
 func (s *Server) issueVerificationToken(ctx context.Context, user sqlite.User) (string, error) {
+	if s.disableVerificationEmail {
+		return "", errors.New("email verification disabled")
+	}
 	if user.ID <= 0 {
 		return "", errors.New("invalid user id")
 	}
@@ -442,6 +471,10 @@ func (s *Server) issueVerificationToken(ctx context.Context, user sqlite.User) (
 }
 
 func (s *Server) handleVerifyAccount(c *gin.Context) {
+	if s.disableVerificationEmail {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Weryfikacja adresów e-mail jest wyłączona."})
+		return
+	}
 	token := strings.TrimSpace(c.Request.URL.Query().Get("token"))
 	if token == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing token"})
@@ -483,6 +516,10 @@ func (s *Server) handleVerifyAccount(c *gin.Context) {
 }
 
 func (s *Server) handleResendVerification(c *gin.Context) {
+	if s.disableVerificationEmail {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Konto jest już potwierdzone."})
+		return
+	}
 	var req authRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})

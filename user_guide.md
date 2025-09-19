@@ -55,23 +55,22 @@ Możesz uruchomić frontend i backend osobno, aby mieć szybkie odświeżanie ko
    ```
    Backend nasłuchuje na `http://localhost:3000`.
 
-#### Konfiguracja SMTP
+#### Konfiguracja backendu
 
-Aby włączyć wysyłkę prawdziwych wiadomości aktywacyjnych skonfiguruj zmienne środowiskowe przed startem serwera:
+Ustawienia serwera znajdują się w pliku `backend/config.json` (format JSON/JSON5). Możesz rozpocząć od skopiowania przykładu:
 
 ```bash
-export SMTP_HOST="smtp.example.com"
-export SMTP_PORT="587"
-export SMTP_USERNAME="apikey"
-export SMTP_PASSWORD="sekret"
-export SMTP_SENDER_EMAIL="noreply@example.com"
-export SMTP_SENDER_NAME="Kup Piksel"
-go run .
+cp backend/config.example.json backend/config.json
 ```
 
-Jeżeli konfiguracja jest niepełna backend wypisze czytelny log i przełączy się na tryb konsolowy (link aktywacyjny w logach). Dzięki temu łatwo wychwycić brakujące dane konfiguracyjne.
+Najważniejsze parametry:
 
-> 💡 Do lokalnych testów polecamy [MailHog](https://github.com/mailhog/MailHog): `docker run --rm -p 1025:1025 -p 8025:8025 mailhog/mailhog`. Ustaw `SMTP_HOST=localhost` oraz `SMTP_PORT=1025`, a odebrane wiadomości zobaczysz w przeglądarce pod `http://localhost:8025`.
+- `disableVerificationEmail` – ustaw na `true`, jeśli w środowisku testowym chcesz pomijać wysyłkę maili i automatycznie weryfikować konta.
+- `smtp` – sekcja z danymi serwera SMTP (`host`, `port`, `username`, `password`, `fromEmail`, `fromName`). Pozostaw pustą lub usuń, aby backend korzystał z trybu konsolowego (link w logach).
+
+Ścieżkę do pliku konfiguracyjnego można nadpisać zmienną środowiskową `PIXEL_CONFIG_PATH`. To przydatne np. w Dockerze lub podczas uruchamiania wielu instancji.
+
+> 💡 Do lokalnych testów SMTP polecamy [MailHog](https://github.com/mailhog/MailHog): `docker run --rm -p 1025:1025 -p 8025:8025 mailhog/mailhog`. Skonfiguruj `host` = `localhost`, `port` = `1025`, a odebrane wiadomości zobaczysz w przeglądarce pod `http://localhost:8025`.
 
 ### 3.2 Frontend (Vite)
 1. Zainstaluj paczki NPM:
@@ -93,7 +92,7 @@ Jeżeli konfiguracja jest niepełna backend wypisze czytelny log i przełączy s
        -H "Content-Type: application/json" \
        -d '{"id":42,"status":"taken","color":"#123456","url":"https://example.com"}'
   ```
-- **Test wysyłki e-mail**: po uruchomieniu backendu z konfiguracją SMTP zarejestruj konto testowe:
+- **Test wysyłki e-mail**: po uzupełnieniu sekcji `smtp` w pliku konfiguracyjnym zarejestruj konto testowe:
   ```bash
   curl -X POST http://localhost:3000/api/register \
        -H "Content-Type: application/json" \

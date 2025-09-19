@@ -8,3 +8,8 @@ services:
     environment:
       - NODE_ENV=production
     restart: unless-stopped
+    volumes:
+      - pixel-data:/app/data
+
+volumes:
+  pixel-data:

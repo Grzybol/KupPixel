@@ -4,5 +4,6 @@ backend/frontend_dist/*
 !backend/frontend_dist/index.html
 !backend/frontend_dist/.keep
 frontend/dist
+backend/data/
 .env
 .DS_Store

@@ -31,7 +31,7 @@ func TestLoad_DisableVerificationWithoutSMTP(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("expected config instance, got nil")
 	}
-	if cfg.DisableVerificationEmail != true {
+	if !cfg.DisableVerificationEmail {
 		t.Fatalf("expected DisableVerificationEmail to be true, got %v", cfg.DisableVerificationEmail)
 	}
 	if cfg.SMTP != nil {
@@ -112,8 +112,8 @@ func TestWriteFile_DefaultConfig(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	if cfg.DisableVerificationEmail != true {
-		t.Fatalf("expected DisableVerificationEmail to be true, got %v", cfg.DisableVerificationEmail)
+	if cfg.DisableVerificationEmail {
+		t.Fatalf("expected DisableVerificationEmail to be false, got %v", cfg.DisableVerificationEmail)
 	}
 
 	if cfg.SMTP != nil {

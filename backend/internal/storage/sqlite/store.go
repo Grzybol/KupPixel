@@ -32,14 +32,21 @@ type Pixel struct {
 }
 
 type User struct {
-	ID           int64     `json:"id"`
-	Email        string    `json:"email"`
-	PasswordHash string    `json:"-"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID              int64      `json:"id"`
+	Email           string     `json:"email"`
+	PasswordHash    string     `json:"-"`
+	CreatedAt       time.Time  `json:"created_at"`
+	EmailVerifiedAt *time.Time `json:"email_verified_at,omitempty"`
+}
+
+func (u User) IsEmailVerified() bool {
+	return u.EmailVerifiedAt != nil
 }
 
 var (
-	ErrPixelOwnedByAnotherUser = errors.New("pixel owned by another user")
+	ErrPixelOwnedByAnotherUser  = errors.New("pixel owned by another user")
+	ErrVerificationTokenInvalid = errors.New("verification token invalid")
+	ErrVerificationTokenExpired = errors.New("verification token expired")
 )
 
 type PixelState struct {
@@ -106,7 +113,8 @@ func (s *Store) EnsureSchema(ctx context.Context) (err error) {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 email TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
-                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                email_verified_at TIMESTAMP
         )`); execErr != nil {
 		err = fmt.Errorf("create users table: %w", execErr)
 		return err
@@ -115,6 +123,27 @@ func (s *Store) EnsureSchema(ctx context.Context) (err error) {
 	// Attempt to add missing owner_id column for existing databases. Ignore errors if it already exists.
 	if _, execErr := tx.ExecContext(ctx, `ALTER TABLE pixels ADD COLUMN owner_id INTEGER`); execErr != nil {
 		// ignore error to keep compatibility with fresh schema
+	}
+
+	if _, execErr := tx.ExecContext(ctx, `ALTER TABLE users ADD COLUMN email_verified_at TIMESTAMP`); execErr != nil {
+		// ignore error for databases that already contain the column
+	}
+
+	if _, execErr := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS email_verification_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token TEXT NOT NULL UNIQUE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        )`); execErr != nil {
+		err = fmt.Errorf("create verification tokens table: %w", execErr)
+		return err
+	}
+
+	if _, execErr := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_email_tokens_user_id ON email_verification_tokens(user_id)`); execErr != nil {
+		err = fmt.Errorf("create verification token index: %w", execErr)
+		return err
 	}
 
 	var count int
@@ -389,8 +418,11 @@ func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (Use
 		return User{}, fmt.Errorf("last insert id: %w", err)
 	}
 
-	user := User{ID: id, Email: email, PasswordHash: passwordHash, CreatedAt: time.Now().UTC()}
-	return user, nil
+	createdUser, err := s.GetUserByID(ctx, id)
+	if err != nil {
+		return User{}, fmt.Errorf("reload created user: %w", err)
+	}
+	return createdUser, nil
 }
 
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -400,25 +432,37 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (User, error) 
 	}
 
 	query := fmt.Sprintf(
-		"SELECT id, email, password_hash, created_at FROM users WHERE email = %s",
+		"SELECT id, email, password_hash, created_at, email_verified_at FROM users WHERE email = %s",
 		quoteLiteral(email),
 	)
 
 	row := s.db.QueryRowContext(ctx, query)
 	var user User
-	var created string
-	if err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &created); err != nil {
+	var created sql.NullString
+	var verified sql.NullString
+	if err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &created, &verified); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, sql.ErrNoRows
 		}
 		return User{}, fmt.Errorf("scan user by email: %w", err)
 	}
 
-	parsed, err := parseUpdatedAt(created)
+	if !created.Valid || strings.TrimSpace(created.String) == "" {
+		return User{}, errors.New("user missing created_at")
+	}
+	parsedCreated, err := parseUpdatedAt(created.String)
 	if err != nil {
 		return User{}, fmt.Errorf("parse created_at: %w", err)
 	}
-	user.CreatedAt = parsed
+	user.CreatedAt = parsedCreated
+
+	if verified.Valid && strings.TrimSpace(verified.String) != "" {
+		parsedVerified, parseErr := parseUpdatedAt(verified.String)
+		if parseErr != nil {
+			return User{}, fmt.Errorf("parse email_verified_at: %w", parseErr)
+		}
+		user.EmailVerifiedAt = &parsedVerified
+	}
 	return user, nil
 }
 
@@ -427,22 +471,185 @@ func (s *Store) GetUserByID(ctx context.Context, id int64) (User, error) {
 		return User{}, errors.New("invalid user id")
 	}
 
-	query := fmt.Sprintf("SELECT id, email, password_hash, created_at FROM users WHERE id = %d", id)
+	query := fmt.Sprintf("SELECT id, email, password_hash, created_at, email_verified_at FROM users WHERE id = %d", id)
 	row := s.db.QueryRowContext(ctx, query)
 	var user User
-	var created string
-	if err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &created); err != nil {
+	var created sql.NullString
+	var verified sql.NullString
+	if err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &created, &verified); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, sql.ErrNoRows
 		}
 		return User{}, fmt.Errorf("scan user by id: %w", err)
 	}
 
-	parsed, err := parseUpdatedAt(created)
+	if !created.Valid || strings.TrimSpace(created.String) == "" {
+		return User{}, errors.New("user missing created_at")
+	}
+	parsedCreated, err := parseUpdatedAt(created.String)
 	if err != nil {
 		return User{}, fmt.Errorf("parse created_at: %w", err)
 	}
-	user.CreatedAt = parsed
+	user.CreatedAt = parsedCreated
+
+	if verified.Valid && strings.TrimSpace(verified.String) != "" {
+		parsedVerified, parseErr := parseUpdatedAt(verified.String)
+		if parseErr != nil {
+			return User{}, fmt.Errorf("parse email_verified_at: %w", parseErr)
+		}
+		user.EmailVerifiedAt = &parsedVerified
+	}
+	return user, nil
+}
+
+func (s *Store) CreateEmailVerificationToken(ctx context.Context, userID int64, token string, expiresAt time.Time) error {
+	if userID <= 0 {
+		return errors.New("invalid user id")
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return errors.New("token must not be empty")
+	}
+	if expiresAt.IsZero() {
+		return errors.New("expires at must not be zero")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin create verification token: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	deleteQuery := fmt.Sprintf("DELETE FROM email_verification_tokens WHERE user_id = %d", userID)
+	if _, execErr := tx.ExecContext(ctx, deleteQuery); execErr != nil {
+		err = fmt.Errorf("delete existing verification tokens: %w", execErr)
+		return err
+	}
+
+	insertQuery := fmt.Sprintf(
+		"INSERT INTO email_verification_tokens(user_id, token, expires_at) VALUES (%d, %s, %s)",
+		userID,
+		quoteLiteral(token),
+		quoteLiteral(expiresAt.UTC().Format(time.RFC3339Nano)),
+	)
+	if _, execErr := tx.ExecContext(ctx, insertQuery); execErr != nil {
+		if strings.Contains(strings.ToLower(execErr.Error()), "unique") {
+			err = fmt.Errorf("verification token already exists: %w", execErr)
+			return err
+		}
+		err = fmt.Errorf("insert verification token: %w", execErr)
+		return err
+	}
+
+	if commitErr := tx.Commit(); commitErr != nil {
+		return fmt.Errorf("commit verification token: %w", commitErr)
+	}
+	return nil
+}
+
+func (s *Store) VerifyUserByToken(ctx context.Context, token string) (user User, err error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return User{}, errors.New("token must not be empty")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return User{}, fmt.Errorf("begin verify token: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	query := fmt.Sprintf(
+		"SELECT user_id, expires_at FROM email_verification_tokens WHERE token = %s",
+		quoteLiteral(token),
+	)
+
+	var userID int64
+	var expiresRaw string
+	if scanErr := tx.QueryRowContext(ctx, query).Scan(&userID, &expiresRaw); scanErr != nil {
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			err = ErrVerificationTokenInvalid
+			return User{}, err
+		}
+		err = fmt.Errorf("load verification token: %w", scanErr)
+		return User{}, err
+	}
+
+	expiresAt, parseErr := parseUpdatedAt(expiresRaw)
+	if parseErr != nil {
+		err = fmt.Errorf("parse token expiration: %w", parseErr)
+		return User{}, err
+	}
+
+	if time.Now().UTC().After(expiresAt) {
+		deleteQuery := fmt.Sprintf("DELETE FROM email_verification_tokens WHERE token = %s", quoteLiteral(token))
+		if _, execErr := tx.ExecContext(ctx, deleteQuery); execErr != nil {
+			err = fmt.Errorf("delete expired verification token: %w", execErr)
+			return User{}, err
+		}
+		err = ErrVerificationTokenExpired
+		return User{}, err
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	updateQuery := fmt.Sprintf(
+		"UPDATE users SET email_verified_at = %s WHERE id = %d",
+		quoteLiteral(now),
+		userID,
+	)
+	if _, execErr := tx.ExecContext(ctx, updateQuery); execErr != nil {
+		err = fmt.Errorf("update user verification: %w", execErr)
+		return User{}, err
+	}
+
+	cleanupQuery := fmt.Sprintf("DELETE FROM email_verification_tokens WHERE user_id = %d", userID)
+	if _, execErr := tx.ExecContext(ctx, cleanupQuery); execErr != nil {
+		err = fmt.Errorf("delete user verification tokens: %w", execErr)
+		return User{}, err
+	}
+
+	selectQuery := fmt.Sprintf(
+		"SELECT id, email, password_hash, created_at, email_verified_at FROM users WHERE id = %d",
+		userID,
+	)
+	var created sql.NullString
+	var verified sql.NullString
+	if scanErr := tx.QueryRowContext(ctx, selectQuery).Scan(&user.ID, &user.Email, &user.PasswordHash, &created, &verified); scanErr != nil {
+		err = fmt.Errorf("reload verified user: %w", scanErr)
+		return User{}, err
+	}
+
+	if !created.Valid || strings.TrimSpace(created.String) == "" {
+		err = errors.New("verified user missing created_at")
+		return User{}, err
+	}
+	parsedCreated, parseCreatedErr := parseUpdatedAt(created.String)
+	if parseCreatedErr != nil {
+		err = fmt.Errorf("parse verified user created_at: %w", parseCreatedErr)
+		return User{}, err
+	}
+	user.CreatedAt = parsedCreated
+
+	if verified.Valid && strings.TrimSpace(verified.String) != "" {
+		parsedVerified, parseVerifiedErr := parseUpdatedAt(verified.String)
+		if parseVerifiedErr != nil {
+			err = fmt.Errorf("parse verified user email_verified_at: %w", parseVerifiedErr)
+			return User{}, err
+		}
+		user.EmailVerifiedAt = &parsedVerified
+	}
+
+	if commitErr := tx.Commit(); commitErr != nil {
+		return User{}, fmt.Errorf("commit verify token: %w", commitErr)
+	}
 	return user, nil
 }
 

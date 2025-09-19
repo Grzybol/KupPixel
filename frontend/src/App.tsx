@@ -3,6 +3,7 @@ import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import PixelCanvas, { Pixel } from "./components/PixelCanvas";
 import LoginModal from "./components/LoginModal";
 import { useAuth } from "./useAuth";
+import VerifyEmailPage from "./VerifyEmailPage";
 
 type PixelResponse = {
   width: number;
@@ -111,7 +112,7 @@ function LandingPage() {
           {user ? (
             <>
               <span className="rounded-full bg-slate-800/80 px-4 py-2 text-slate-200">
-                Zalogowano jako <span className="font-semibold">{user.username}</span>
+                Zalogowano jako <span className="font-semibold">{user.email}</span>
               </span>
               <button
                 type="button"
@@ -357,6 +358,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/buy/:pixelId" element={<BuyPixelPage />} />
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route
           path="*"
           element={

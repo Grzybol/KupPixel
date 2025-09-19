@@ -20,6 +20,7 @@ import (
 
 	gin "github.com/gin-gonic/gin"
 
+	"github.com/example/kup-piksel/internal/mailer"
 	"github.com/example/kup-piksel/internal/storage/sqlite"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -35,8 +36,10 @@ type UpdatePixelRequest struct {
 }
 
 type Server struct {
-	store    *sqlite.Store
-	sessions *SessionManager
+	store                *sqlite.Store
+	sessions             *SessionManager
+	mailer               mailer.Mailer
+	verificationTokenTTL time.Duration
 }
 
 type SessionManager struct {
@@ -90,15 +93,21 @@ type authRequest struct {
 	Password string `json:"password"`
 }
 
+type verifyEmailRequest struct {
+	Token string `json:"token"`
+}
+
 type userResponse struct {
-	ID    int64  `json:"id"`
-	Email string `json:"email"`
+	ID            int64  `json:"id"`
+	Email         string `json:"email"`
+	EmailVerified bool   `json:"email_verified"`
 }
 
 const (
-	defaultDBPath       = "data/pixels.db"
-	sessionCookieName   = "kup_pixel_session"
-	sessionCookieMaxAge = 7 * 24 * 60 * 60
+	defaultDBPath               = "data/pixels.db"
+	sessionCookieName           = "kup_pixel_session"
+	sessionCookieMaxAge         = 7 * 24 * 60 * 60
+	defaultVerificationTokenTTL = 24 * time.Hour
 )
 
 func generateSessionID() (string, error) {
@@ -147,7 +156,7 @@ func readSessionCookie(r *http.Request) (string, bool, error) {
 }
 
 func sanitizeUser(user sqlite.User) userResponse {
-	return userResponse{ID: user.ID, Email: user.Email}
+	return userResponse{ID: user.ID, Email: user.Email, EmailVerified: user.IsEmailVerified()}
 }
 
 func (s *Server) getSessionUser(c *gin.Context) (sqlite.User, string, bool) {
@@ -219,12 +228,19 @@ func main() {
 	seedDemoPixels(ctx, store)
 
 	router := gin.Default()
-	server := &Server{store: store, sessions: NewSessionManager()}
+	publicBaseURL := os.Getenv("PUBLIC_BASE_URL")
+	server := &Server{
+		store:                store,
+		sessions:             NewSessionManager(),
+		mailer:               mailer.NewLoggerMailer(publicBaseURL),
+		verificationTokenTTL: defaultVerificationTokenTTL,
+	}
 
 	router.POST("/api/register", server.handleRegister)
 	router.POST("/api/login", server.handleLogin)
 	router.POST("/api/logout", server.handleLogout)
 	router.GET("/api/session", server.handleSession)
+	router.POST("/api/verify-email", server.handleVerifyEmail)
 
 	router.GET("/api/pixels", server.handleGetPixels)
 	router.POST("/api/pixels", server.handleUpdatePixel)
@@ -285,15 +301,85 @@ func (s *Server) handleRegister(c *gin.Context) {
 		return
 	}
 
+	token, err := generateSessionID()
+	if err != nil {
+		log.Printf("generate verification token: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
+		return
+	}
+
+	ttl := s.verificationTokenTTL
+	if ttl <= 0 {
+		ttl = defaultVerificationTokenTTL
+	}
+	expiresAt := time.Now().UTC().Add(ttl)
+	if err := s.store.CreateEmailVerificationToken(c.Request.Context(), user.ID, token, expiresAt); err != nil {
+		log.Printf("create verification token: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
+		return
+	}
+
+	if s.mailer != nil {
+		if err := s.mailer.SendVerificationEmail(c.Request.Context(), user.Email, token); err != nil {
+			log.Printf("send verification email: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send verification email"})
+			return
+		}
+	} else {
+		log.Printf("mailer not configured: skipping email for %s", user.Email)
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message":               "Konto utworzone. Sprawdź skrzynkę pocztową i kliknij w link aktywacyjny.",
+		"requires_verification": true,
+	})
+}
+
+func (s *Server) handleVerifyEmail(c *gin.Context) {
+	var req verifyEmailRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+
+	token := strings.TrimSpace(req.Token)
+	if token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "token is required"})
+		return
+	}
+
+	user, err := s.store.VerifyUserByToken(c.Request.Context(), token)
+	if err != nil {
+		switch {
+		case errors.Is(err, sqlite.ErrVerificationTokenInvalid):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "nieprawidłowy token weryfikacyjny"})
+			return
+		case errors.Is(err, sqlite.ErrVerificationTokenExpired):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":                 "token weryfikacyjny wygasł. Zarejestruj się ponownie, aby otrzymać nowy.",
+				"token_expired":         true,
+				"requires_verification": true,
+			})
+			return
+		default:
+			log.Printf("verify email token %q: %v", token, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify email"})
+			return
+		}
+	}
+
 	sessionID, err := s.sessions.Create(user.ID)
 	if err != nil {
-		log.Printf("create session: %v", err)
+		log.Printf("create session after verification: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
 		return
 	}
 	setSessionCookie(c, sessionID)
 
-	c.JSON(http.StatusCreated, gin.H{"user": sanitizeUser(user)})
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Adres e-mail został potwierdzony. Możesz już korzystać z konta.",
+		"user":    sanitizeUser(user),
+	})
 }
 
 func (s *Server) handleLogin(c *gin.Context) {
@@ -323,6 +409,14 @@ func (s *Server) handleLogin(c *gin.Context) {
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		return
+	}
+
+	if !user.IsEmailVerified() {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":                 "konto wymaga potwierdzenia adresu e-mail",
+			"requires_verification": true,
+		})
 		return
 	}
 

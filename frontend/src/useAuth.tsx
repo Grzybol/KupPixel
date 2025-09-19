@@ -10,13 +10,19 @@ import {
 } from "react";
 
 export type AuthUser = {
-  username: string;
+  id: number;
+  email: string;
+  emailVerified: boolean;
   [key: string]: unknown;
 };
 
 type LoginCredentials = {
-  username: string;
+  email: string;
   password: string;
+};
+
+type AuthError = Error & {
+  requiresVerification?: boolean;
 };
 
 type OpenOptions = {
@@ -38,18 +44,48 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-function parseUser(data: unknown): AuthUser | null {
-  if (!data || typeof data !== "object") {
+function toAuthUser(raw: unknown): AuthUser | null {
+  if (!raw || typeof raw !== "object") {
     return null;
   }
-  if ("username" in data && typeof (data as Record<string, unknown>).username === "string") {
-    return data as AuthUser;
+  const record = raw as Record<string, unknown>;
+  const emailValue = record.email;
+  if (typeof emailValue !== "string" || emailValue.trim() === "") {
+    return null;
   }
-  if ("user" in data && typeof (data as Record<string, unknown>).user === "object") {
-    const nested = (data as Record<string, unknown>).user as Record<string, unknown>;
-    if (typeof nested.username === "string") {
-      return nested as AuthUser;
+
+  const idValue = record.id;
+  let id: number | null = null;
+  if (typeof idValue === "number" && Number.isFinite(idValue)) {
+    id = idValue;
+  } else if (typeof idValue === "string" && idValue.trim() !== "") {
+    const parsed = Number(idValue);
+    if (Number.isFinite(parsed)) {
+      id = parsed;
     }
+  }
+  if (id === null) {
+    return null;
+  }
+
+  const verifiedRaw = record.email_verified ?? record.emailVerified;
+  const emailVerified = typeof verifiedRaw === "boolean" ? verifiedRaw : false;
+
+  const user: AuthUser = {
+    id,
+    email: emailValue,
+    emailVerified,
+  };
+  return user;
+}
+
+function parseUser(data: unknown): AuthUser | null {
+  const direct = toAuthUser(data);
+  if (direct) {
+    return direct;
+  }
+  if (data && typeof data === "object" && "user" in data) {
+    return toAuthUser((data as Record<string, unknown>).user);
   }
   return null;
 }
@@ -132,17 +168,40 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const login = useCallback(
     async (credentials: LoginCredentials) => {
+      const payload = {
+        email: credentials.email.trim().toLowerCase(),
+        password: credentials.password,
+      };
       const response = await fetch("/api/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         credentials: "include",
-        body: JSON.stringify(credentials),
+        body: JSON.stringify(payload),
       });
       if (!response.ok) {
-        const message = await response.text().catch(() => "");
-        throw new Error(message || "Nie udało się zalogować. Spróbuj ponownie.");
+        let message = "Nie udało się zalogować. Spróbuj ponownie.";
+        let requiresVerification = false;
+        try {
+          const data = (await response.json()) as Record<string, unknown>;
+          if (data && typeof data.error === "string" && data.error.trim() !== "") {
+            message = data.error;
+          }
+          if (typeof data?.requires_verification === "boolean") {
+            requiresVerification = data.requires_verification;
+          }
+        } catch (error) {
+          const fallback = await response.text().catch(() => "");
+          if (fallback.trim() !== "") {
+            message = fallback;
+          }
+        }
+        const authError = new Error(message) as AuthError;
+        if (requiresVerification) {
+          authError.requiresVerification = true;
+        }
+        throw authError;
       }
       await refresh().catch(() => {
         // refresh already logs error and resets user; surface a more helpful message

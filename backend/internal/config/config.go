@@ -18,6 +18,31 @@ type Config struct {
 	DisableVerificationEmail bool              `json:"disableVerificationEmail"`
 }
 
+// Default returns the configuration used when no config file exists on disk yet.
+func Default() *Config {
+	return &Config{DisableVerificationEmail: true}
+}
+
+// WriteFile writes the given configuration as prettified JSON to the provided path.
+func WriteFile(path string, cfg *Config) error {
+	if cfg == nil {
+		return errors.New("config must not be nil")
+	}
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	data = append(data, '\n')
+
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write config file: %w", err)
+	}
+
+	return nil
+}
+
 // Load reads the configuration from a JSON or JSON5 file located at the given path.
 func Load(path string) (*Config, error) {
 	if strings.TrimSpace(path) == "" {

@@ -90,3 +90,33 @@ func TestLoad_MissingPath(t *testing.T) {
 		t.Fatal("expected error for empty path")
 	}
 }
+
+func TestWriteFile_DefaultConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected file to not exist, got: %v", err)
+	}
+
+	if err := WriteFile(path, Default()); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected file to exist, got: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.DisableVerificationEmail != true {
+		t.Fatalf("expected DisableVerificationEmail to be true, got %v", cfg.DisableVerificationEmail)
+	}
+
+	if cfg.SMTP != nil {
+		t.Fatalf("expected SMTP to be nil, got %#v", cfg.SMTP)
+	}
+}

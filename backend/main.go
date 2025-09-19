@@ -228,6 +228,21 @@ func main() {
 		configPath = defaultConfigPath
 	}
 
+	if _, err := os.Stat(configPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if dir := filepath.Dir(configPath); dir != "" && dir != "." {
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					log.Fatalf("create config directory: %v", err)
+				}
+			}
+			if err := config.WriteFile(configPath, config.Default()); err != nil {
+				log.Fatalf("write default config: %v", err)
+			}
+		} else {
+			log.Fatalf("stat config: %v", err)
+		}
+	}
+
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		log.Fatalf("load config: %v", err)

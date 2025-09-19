@@ -19,6 +19,11 @@ type LoginCredentials = {
   password: string;
 };
 
+type RegisterCredentials = {
+  email: string;
+  password: string;
+};
+
 type OpenOptions = {
   message?: string;
 };
@@ -27,6 +32,7 @@ type AuthContextValue = {
   user: AuthUser | null;
   isLoading: boolean;
   login: (credentials: LoginCredentials) => Promise<void>;
+  register: (credentials: RegisterCredentials) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<AuthUser | null>;
   ensureAuthenticated: (options?: OpenOptions) => Promise<boolean>;
@@ -158,6 +164,33 @@ export function AuthProvider({ children }: PropsWithChildren) {
     [refresh]
   );
 
+  const register = useCallback(
+    async (credentials: RegisterCredentials) => {
+      const response = await fetch("/api/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify(credentials),
+      });
+      if (!response.ok) {
+        const message = await response.text().catch(() => "");
+        throw new Error(message || "Nie udało się utworzyć konta. Spróbuj ponownie.");
+      }
+      await refresh().catch(() => {
+        throw new Error("Nie udało się odczytać informacji o sesji.");
+      });
+      setIsLoginModalOpen(false);
+      setLoginPrompt(null);
+      if (loginResolverRef.current) {
+        loginResolverRef.current(true);
+        loginResolverRef.current = null;
+      }
+    },
+    [refresh]
+  );
+
   const logout = useCallback(async () => {
     try {
       await fetch("/api/logout", {
@@ -183,6 +216,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       user,
       isLoading,
       login,
+      register,
       logout,
       refresh,
       ensureAuthenticated,

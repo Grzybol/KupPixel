@@ -2,6 +2,7 @@ import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from "rea
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import PixelCanvas, { Pixel } from "./components/PixelCanvas";
 import LoginModal from "./components/LoginModal";
+import RegisterModal from "./components/RegisterModal";
 import { useAuth } from "./useAuth";
 
 type PixelResponse = {
@@ -65,7 +66,11 @@ function usePixels() {
   return { data, loading, error } as const;
 }
 
-function LandingPage() {
+type LandingPageProps = {
+  onOpenRegister: () => void;
+};
+
+function LandingPage({ onOpenRegister }: LandingPageProps) {
   const navigate = useNavigate();
   const { data, loading, error } = usePixels();
   const { user, ensureAuthenticated, openLoginModal, logout } = useAuth();
@@ -122,15 +127,24 @@ function LandingPage() {
               </button>
             </>
           ) : (
-            <button
-              type="button"
-              onClick={() => {
-                void openLoginModal({ message: "Zaloguj się, aby rozpocząć." });
-              }}
-              className="rounded-full bg-blue-500 px-6 py-2 font-semibold text-white shadow-lg transition hover:bg-blue-400"
-            >
-              Zaloguj się
-            </button>
+            <div className="flex flex-col items-stretch gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={onOpenRegister}
+                className="rounded-full bg-blue-500 px-6 py-2 font-semibold text-white shadow-lg transition hover:bg-blue-400"
+              >
+                Załóż konto
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void openLoginModal({ message: "Zaloguj się, aby rozpocząć." });
+                }}
+                className="rounded-full bg-slate-800/70 px-6 py-2 font-semibold text-slate-200 transition hover:bg-slate-700"
+              >
+                Zaloguj się
+              </button>
+            </div>
           )}
         </div>
       </header>
@@ -352,10 +366,25 @@ function BuyPixelPage() {
 }
 
 export default function App() {
+  const { openLoginModal } = useAuth();
+  const [isRegisterOpen, setIsRegisterOpen] = useState(false);
+
+  const handleOpenRegister = useCallback(() => {
+    setIsRegisterOpen(true);
+  }, []);
+
+  const handleCloseRegister = useCallback(() => {
+    setIsRegisterOpen(false);
+  }, []);
+
+  const handleOpenLoginFromRegister = useCallback(() => {
+    void openLoginModal({ message: "Zaloguj się, aby rozpocząć." });
+  }, [openLoginModal]);
+
   return (
     <>
       <Routes>
-        <Route path="/" element={<LandingPage />} />
+        <Route path="/" element={<LandingPage onOpenRegister={handleOpenRegister} />} />
         <Route path="/buy/:pixelId" element={<BuyPixelPage />} />
         <Route
           path="*"
@@ -370,6 +399,13 @@ export default function App() {
         />
       </Routes>
       <LoginModal />
+      <RegisterModal
+        isOpen={isRegisterOpen}
+        onClose={handleCloseRegister}
+        onOpenLogin={() => {
+          handleOpenLoginFromRegister();
+        }}
+      />
     </>
   );
 }

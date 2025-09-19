@@ -116,6 +116,25 @@ func (s *Store) EnsureSchema(ctx context.Context) (err error) {
 	return nil
 }
 
+func parseUpdatedAt(value string) (time.Time, error) {
+	layouts := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+	}
+
+	var parseErr error
+	for _, layout := range layouts {
+		parsed, err := time.Parse(layout, value)
+		if err == nil {
+			return parsed.UTC(), nil
+		}
+		parseErr = err
+	}
+
+	return time.Time{}, fmt.Errorf("unsupported time format %q: %w", value, parseErr)
+}
+
 func (s *Store) GetAllPixels(ctx context.Context) (PixelState, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, status, COALESCE(color, ''), COALESCE(url, ''), updated_at FROM pixels ORDER BY id`)
 	if err != nil {
@@ -126,12 +145,16 @@ func (s *Store) GetAllPixels(ctx context.Context) (PixelState, error) {
 	pixels := make([]Pixel, 0, TotalPixels)
 	for rows.Next() {
 		var pixel Pixel
-		var updated sql.NullTime
+		var updated sql.NullString
 		if err := rows.Scan(&pixel.ID, &pixel.Status, &pixel.Color, &pixel.URL, &updated); err != nil {
 			return PixelState{}, fmt.Errorf("scan pixel: %w", err)
 		}
 		if updated.Valid {
-			pixel.UpdatedAt = updated.Time
+			parsed, err := parseUpdatedAt(updated.String)
+			if err != nil {
+				return PixelState{}, fmt.Errorf("parse pixel %d updated_at: %w", pixel.ID, err)
+			}
+			pixel.UpdatedAt = parsed
 		}
 		pixels = append(pixels, pixel)
 	}

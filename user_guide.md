@@ -55,6 +55,24 @@ Możesz uruchomić frontend i backend osobno, aby mieć szybkie odświeżanie ko
    ```
    Backend nasłuchuje na `http://localhost:3000`.
 
+#### Konfiguracja SMTP
+
+Aby włączyć wysyłkę prawdziwych wiadomości aktywacyjnych skonfiguruj zmienne środowiskowe przed startem serwera:
+
+```bash
+export SMTP_HOST="smtp.example.com"
+export SMTP_PORT="587"
+export SMTP_USERNAME="apikey"
+export SMTP_PASSWORD="sekret"
+export SMTP_SENDER_EMAIL="noreply@example.com"
+export SMTP_SENDER_NAME="Kup Piksel"
+go run .
+```
+
+Jeżeli konfiguracja jest niepełna backend wypisze czytelny log i przełączy się na tryb konsolowy (link aktywacyjny w logach). Dzięki temu łatwo wychwycić brakujące dane konfiguracyjne.
+
+> 💡 Do lokalnych testów polecamy [MailHog](https://github.com/mailhog/MailHog): `docker run --rm -p 1025:1025 -p 8025:8025 mailhog/mailhog`. Ustaw `SMTP_HOST=localhost` oraz `SMTP_PORT=1025`, a odebrane wiadomości zobaczysz w przeglądarce pod `http://localhost:8025`.
+
 ### 3.2 Frontend (Vite)
 1. Zainstaluj paczki NPM:
    ```bash
@@ -75,6 +93,13 @@ Możesz uruchomić frontend i backend osobno, aby mieć szybkie odświeżanie ko
        -H "Content-Type: application/json" \
        -d '{"id":42,"status":"taken","color":"#123456","url":"https://example.com"}'
   ```
+- **Test wysyłki e-mail**: po uruchomieniu backendu z konfiguracją SMTP zarejestruj konto testowe:
+  ```bash
+  curl -X POST http://localhost:3000/api/register \
+       -H "Content-Type: application/json" \
+       -d '{"email":"test@example.com","password":"Test1234!"}'
+  ```
+  W logach serwera (ConsoleMailer) lub w panelu MailHog zobaczysz wiadomość aktywacyjną z linkiem weryfikacyjnym.
 
 > ℹ️ Po zmianie frontendu warto wykonać `npm run build` (patrz sekcja 4), by upewnić się że kompilacja produkcyjna przechodzi bez błędów.
 

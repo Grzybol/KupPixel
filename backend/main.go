@@ -253,10 +253,25 @@ func main() {
 		verificationBaseURL = defaultVerificationBaseURL
 	}
 
+	var mailer email.Mailer = email.NewConsoleMailer("Kup Piksel")
+	if cfg, err := email.LoadSMTPConfigFromEnv(os.Getenv); err != nil {
+		log.Printf("smtp configuration invalid: %v", err)
+		log.Printf("falling back to console mailer")
+	} else if cfg != nil {
+		smtpMailer, err := email.NewSMTPMailer(*cfg)
+		if err != nil {
+			log.Printf("failed to initialise smtp mailer: %v", err)
+			log.Printf("falling back to console mailer")
+		} else {
+			mailer = smtpMailer
+			log.Printf("smtp mailer enabled for %s", cfg.Address())
+		}
+	}
+
 	server := &Server{
 		store:                store,
 		sessions:             NewSessionManager(),
-		mailer:               email.NewConsoleMailer("Kup Piksel"),
+		mailer:               mailer,
 		verificationBaseURL:  verificationBaseURL,
 		verificationTokenTTL: defaultVerificationTTL,
 	}

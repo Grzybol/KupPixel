@@ -24,11 +24,26 @@ Każdy piksel można kliknąć, zobaczyć czy jest wolny czy zajęty i w przysz�
 
 ## 🏗 Architektura
 
-- **Frontend**: React + TypeScript + Tailwind CSS  
-- **Backend**: Go (Gin framework) – API REST do obsługi pikseli  
+- **Frontend**: React + TypeScript + Tailwind CSS
+- **Backend**: Go (Gin framework) – API REST do obsługi pikseli
 - **Baza danych**: SQLite (plik tworzony domyślnie pod `backend/data/pixels.db`, można zmienić ścieżkę zmienną `PIXEL_DB_PATH`)
 - **Docker**: multi-stage build → jeden image z frontendem i backendem
 - **Nginx/Reverse Proxy**: opcjonalnie do hostingu na VPS + SSL
+
+### ✉️ Wysyłka e-maili
+
+Backend potrafi wysyłać realne wiadomości SMTP z linkami aktywacyjnymi. W środowisku deweloperskim, gdy konfiguracja SMTP nie jest ustawiona, serwer loguje treść wiadomości (ConsoleMailer). Aby aktywować transport SMTP ustaw poniższe zmienne środowiskowe:
+
+| Zmienna | Opis |
+| --- | --- |
+| `SMTP_HOST` | Adres serwera SMTP (np. `smtp.gmail.com`). |
+| `SMTP_PORT` | Port serwera SMTP (np. `587`). |
+| `SMTP_USERNAME` | Nazwa użytkownika konta SMTP (opcjonalna dla serwerów bez uwierzytelnienia, wymaga pary z hasłem). |
+| `SMTP_PASSWORD` | Hasło/APi key do konta SMTP. |
+| `SMTP_SENDER_EMAIL` | Adres nadawcy wiadomości (np. `noreply@twojadomena.pl`). |
+| `SMTP_SENDER_NAME` | (Opcjonalnie) nazwa wyświetlana nadawcy. Domyślnie `Kup Piksel`. |
+
+Jeśli dowolna z wymaganych wartości (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SENDER_EMAIL`) jest pominięta, backend zapisze czytelny log i automatycznie wróci do trybu konsolowego.
 
 ### 💾 Przechowywanie danych backendu
 

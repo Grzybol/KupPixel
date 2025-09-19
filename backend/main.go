@@ -281,6 +281,7 @@ func main() {
 		verificationBaseURL = defaultVerificationBaseURL
 	}
 
+	smtpConfigured := false
 	var mailer email.Mailer = email.NewConsoleMailer("Kup Piksel")
 	if cfg.SMTP != nil {
 		smtpMailer, err := email.NewSMTPMailer(*cfg.SMTP)
@@ -289,6 +290,7 @@ func main() {
 			log.Printf("falling back to console mailer")
 		} else {
 			mailer = smtpMailer
+			smtpConfigured = true
 			log.Printf("smtp mailer enabled for %s", cfg.SMTP.Address())
 		}
 	}
@@ -301,6 +303,15 @@ func main() {
 		verificationTokenTTL:     defaultVerificationTTL,
 		disableVerificationEmail: cfg.DisableVerificationEmail,
 	}
+
+	log.Printf(
+		"startup config: config_path=%s db_path=%s verification_base_url=%s smtp_configured=%t disable_verification_email=%t",
+		configPath,
+		dbPath,
+		verificationBaseURL,
+		smtpConfigured,
+		cfg.DisableVerificationEmail,
+	)
 
 	router.POST("/api/register", server.handleRegister)
 	router.POST("/api/login", server.handleLogin)

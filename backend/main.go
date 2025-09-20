@@ -488,7 +488,32 @@ func (s *Server) handleLogin(c *gin.Context) {
 	}
 
 	if !user.IsVerified {
-		c.JSON(http.StatusForbidden, gin.H{"error": "konto nie zostało jeszcze potwierdzone. Sprawdź skrzynkę e-mail."})
+		if s.disableVerificationEmail {
+			c.JSON(http.StatusForbidden, gin.H{"error": "konto nie zostało jeszcze potwierdzone. Sprawdź skrzynkę e-mail."})
+			return
+		}
+
+		token, err := s.issueVerificationToken(c.Request.Context(), user)
+		if err != nil {
+			log.Printf("issue verification token (login): %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
+			return
+		}
+
+		link, err := buildVerificationLink(s.verificationBaseURL, token)
+		if err != nil {
+			log.Printf("build verification link (login): %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
+			return
+		}
+
+		if err := s.mailer.SendVerificationEmail(c.Request.Context(), user.Email, link); err != nil {
+			log.Printf("send verification email (login): %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send verification email"})
+			return
+		}
+
+		c.JSON(http.StatusForbidden, gin.H{"error": "konto nie zostało jeszcze potwierdzone. Nowy link weryfikacyjny został wysłany na adres e-mail."})
 		return
 	}
 

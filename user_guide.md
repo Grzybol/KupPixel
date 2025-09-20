@@ -100,6 +100,7 @@ Najważniejsze parametry:
   ```
   W logach serwera (ConsoleMailer) lub w panelu MailHog zobaczysz wiadomość aktywacyjną z linkiem weryfikacyjnym.
 - **Ponowna rejestracja**: jeśli konto z tym adresem e-mail istnieje, ale nie zostało jeszcze potwierdzone, backend automatycznie wyśle nowy link aktywacyjny (zamiast zgłaszać błąd). Zweryfikowane konta nadal zwracają odpowiedź 409.
+- **Logowanie przed weryfikacją**: próba zalogowania niezweryfikowanego konta również powoduje ponowną wysyłkę linku weryfikacyjnego i blokuje logowanie do czasu potwierdzenia adresu.
 
 > ℹ️ Po zmianie frontendu warto wykonać `npm run build` (patrz sekcja 4), by upewnić się że kompilacja produkcyjna przechodzi bez błędów.
 

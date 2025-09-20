@@ -3,8 +3,10 @@ package email
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"mime"
 	"net"
 	"net/mail"
@@ -102,13 +104,11 @@ func LoadSMTPConfigFromEnv(getenv func(string) string) (*SMTPConfig, error) {
 	return cfg, nil
 }
 
-var smtpSendMailFunc = smtp.SendMail
-
 // SMTPMailer delivers emails through a configured SMTP transport.
 type SMTPMailer struct {
 	config   SMTPConfig
 	auth     smtp.Auth
-	sendMail func(addr string, a smtp.Auth, from string, to []string, msg []byte) error
+	sendMail func(ctx context.Context, cfg SMTPConfig, auth smtp.Auth, from string, to []string, msg []byte) error
 }
 
 // NewSMTPMailer constructs a Mailer using real SMTP transport.
@@ -124,9 +124,11 @@ func NewSMTPMailer(cfg SMTPConfig) (*SMTPMailer, error) {
 	}
 
 	return &SMTPMailer{
-		config:   cfg,
-		auth:     auth,
-		sendMail: smtpSendMailFunc,
+		config: cfg,
+		auth:   auth,
+		sendMail: func(ctx context.Context, cfg SMTPConfig, auth smtp.Auth, from string, to []string, msg []byte) error {
+			return sendMailWithContext(ctx, cfg, auth, from, to, msg)
+		},
 	}, nil
 }
 
@@ -171,9 +173,115 @@ func (m *SMTPMailer) SendVerificationEmail(ctx context.Context, recipient, verif
 	msg.WriteString("\r\n")
 	msg.WriteString(body)
 
-	if err := m.sendMail(m.config.Address(), m.auth, m.config.FromEmail, []string{recipient}, msg.Bytes()); err != nil {
+	if err := m.sendMail(ctx, m.config, m.auth, m.config.FromEmail, []string{recipient}, msg.Bytes()); err != nil {
 		return fmt.Errorf("send smtp email: %w", err)
 	}
+	return nil
+}
+
+func sendMailWithContext(ctx context.Context, cfg SMTPConfig, auth smtp.Auth, from string, to []string, msg []byte) (err error) {
+	dialer := &net.Dialer{}
+	conn, err := dialer.DialContext(ctx, "tcp", cfg.Address())
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		return err
+	}
+
+	client, err := smtp.NewClient(conn, cfg.Host)
+	if err != nil {
+		_ = conn.Close()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		return err
+	}
+
+	ctxDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = client.Close()
+		case <-ctxDone:
+		}
+	}()
+
+	defer func() {
+		close(ctxDone)
+		if err != nil {
+			_ = client.Close()
+			return
+		}
+		if quitErr := client.Quit(); quitErr != nil && !errors.Is(quitErr, io.EOF) {
+			err = quitErr
+		}
+	}()
+
+	if ok, _ := client.Extension("STARTTLS"); ok {
+		tlsConfig := &tls.Config{ServerName: cfg.Host}
+		if err = client.StartTLS(tlsConfig); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			return err
+		}
+	}
+
+	if auth != nil {
+		if ok, _ := client.Extension("AUTH"); ok {
+			if err = client.Auth(auth); err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return ctxErr
+				}
+				return err
+			}
+		}
+	}
+
+	if err = client.Mail(from); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		return err
+	}
+
+	for _, addr := range to {
+		if err = client.Rcpt(addr); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			return err
+		}
+	}
+
+	wc, err := client.Data()
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		return err
+	}
+
+	if _, err = wc.Write(msg); err != nil {
+		_ = wc.Close()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		return err
+	}
+
+	if err = wc.Close(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		return err
+	}
+
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+
 	return nil
 }
 

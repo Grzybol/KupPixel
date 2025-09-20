@@ -2,9 +2,11 @@ package email
 
 import (
 	"context"
+	"errors"
 	"net/smtp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadSMTPConfigFromEnv(t *testing.T) {
@@ -79,8 +81,8 @@ func TestSMTPMailerSendVerificationEmail(t *testing.T) {
 	var capturedFrom string
 	var capturedTo []string
 	var capturedMsg []byte
-	mailer.sendMail = func(addr string, a smtp.Auth, from string, to []string, msg []byte) error {
-		capturedAddr = addr
+	mailer.sendMail = func(ctx context.Context, cfg SMTPConfig, a smtp.Auth, from string, to []string, msg []byte) error {
+		capturedAddr = cfg.Address()
 		capturedFrom = from
 		capturedTo = append([]string(nil), to...)
 		capturedMsg = append([]byte(nil), msg...)
@@ -108,4 +110,48 @@ func TestSMTPMailerSendVerificationEmail(t *testing.T) {
 	if !strings.Contains(lowerMsg, "subject: =?utf-8?q?potwierd=c5=ba_sw=c3=b3j_adres_e-mail?=") {
 		t.Fatalf("subject should be encoded, got %s", string(capturedMsg))
 	}
+
+	t.Run("context cancellation", func(t *testing.T) {
+		cfg := SMTPConfig{
+			Host:      "smtp.example.com",
+			Port:      587,
+			FromEmail: "noreply@example.com",
+			FromName:  "Kup Piksel",
+		}
+		mailer, err := NewSMTPMailer(cfg)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		started := make(chan struct{})
+		mailer.sendMail = func(ctx context.Context, cfg SMTPConfig, a smtp.Auth, from string, to []string, msg []byte) error {
+			close(started)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(2 * time.Second):
+				t.Fatalf("sendMail was not cancelled")
+			}
+			return nil
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- mailer.SendVerificationEmail(ctx, "user@example.com", "https://kup-piksel.test/verify?token=cancel")
+		}()
+
+		<-started
+		cancel()
+
+		err = <-errCh
+		if err == nil {
+			t.Fatalf("expected error when context cancelled")
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context cancellation error, got %v", err)
+		}
+	})
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net"
 	"net/mail"
@@ -159,6 +160,13 @@ func (m *SMTPMailer) SendVerificationEmail(ctx context.Context, recipient, verif
 	from := mail.Address{Name: m.config.FromName, Address: m.config.FromEmail}
 	to := mail.Address{Address: recipient}
 
+	log.Printf(
+		"[smtp] preparing verification email via %s from=%s to=%s",
+		m.config.Address(),
+		from.String(),
+		to.Address,
+	)
+
 	subject := "Potwierdź swój adres e-mail"
 	encodedSubject := mime.QEncoding.Encode("utf-8", subject)
 	body := fmt.Sprintf("Cześć!\n\nKliknij poniższy link, aby potwierdzić swoje konto w Kup Piksel:\n%s\n\nJeżeli to nie Ty zakładałeś konto, zignoruj tę wiadomość.\n", verificationLink)
@@ -173,14 +181,19 @@ func (m *SMTPMailer) SendVerificationEmail(ctx context.Context, recipient, verif
 	msg.WriteString("\r\n")
 	msg.WriteString(body)
 
-	if err := m.sendMail(ctx, m.config, m.auth, m.config.FromEmail, []string{recipient}, msg.Bytes()); err != nil {
+	payload := msg.Bytes()
+	log.Printf("[smtp] sending email payload size=%d bytes", len(payload))
+
+	if err := m.sendMail(ctx, m.config, m.auth, m.config.FromEmail, []string{recipient}, payload); err != nil {
 		return fmt.Errorf("send smtp email: %w", err)
 	}
+	log.Printf("[smtp] verification email sent successfully to %s", recipient)
 	return nil
 }
 
 func sendMailWithContext(ctx context.Context, cfg SMTPConfig, auth smtp.Auth, from string, to []string, msg []byte) (err error) {
 	dialer := &net.Dialer{}
+	log.Printf("[smtp] dialing %s", cfg.Address())
 	conn, err := dialer.DialContext(ctx, "tcp", cfg.Address())
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -188,6 +201,7 @@ func sendMailWithContext(ctx context.Context, cfg SMTPConfig, auth smtp.Auth, fr
 		}
 		return err
 	}
+	log.Printf("[smtp] connected to %s", cfg.Address())
 
 	client, err := smtp.NewClient(conn, cfg.Host)
 	if err != nil {
@@ -197,6 +211,7 @@ func sendMailWithContext(ctx context.Context, cfg SMTPConfig, auth smtp.Auth, fr
 		}
 		return err
 	}
+	log.Printf("[smtp] created smtp client for host=%s", cfg.Host)
 
 	ctxDone := make(chan struct{})
 	go func() {
@@ -219,6 +234,7 @@ func sendMailWithContext(ctx context.Context, cfg SMTPConfig, auth smtp.Auth, fr
 	}()
 
 	if ok, _ := client.Extension("STARTTLS"); ok {
+		log.Printf("[smtp] attempting STARTTLS for host=%s", cfg.Host)
 		tlsConfig := &tls.Config{ServerName: cfg.Host}
 		if err = client.StartTLS(tlsConfig); err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
@@ -226,19 +242,29 @@ func sendMailWithContext(ctx context.Context, cfg SMTPConfig, auth smtp.Auth, fr
 			}
 			return err
 		}
+		log.Printf("[smtp] STARTTLS negotiation succeeded")
+	} else {
+		log.Printf("[smtp] server does not advertise STARTTLS; continuing without TLS upgrade")
 	}
 
 	if auth != nil {
 		if ok, _ := client.Extension("AUTH"); ok {
+			log.Printf("[smtp] authenticating as %s", cfg.Username)
 			if err = client.Auth(auth); err != nil {
 				if ctxErr := ctx.Err(); ctxErr != nil {
 					return ctxErr
 				}
 				return err
 			}
+			log.Printf("[smtp] authentication successful")
+		} else {
+			log.Printf("[smtp] server does not advertise AUTH; skipping authentication")
 		}
+	} else {
+		log.Printf("[smtp] no smtp auth configured; proceeding without authentication")
 	}
 
+	log.Printf("[smtp] MAIL FROM %s", from)
 	if err = client.Mail(from); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
@@ -247,6 +273,7 @@ func sendMailWithContext(ctx context.Context, cfg SMTPConfig, auth smtp.Auth, fr
 	}
 
 	for _, addr := range to {
+		log.Printf("[smtp] RCPT TO %s", addr)
 		if err = client.Rcpt(addr); err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return ctxErr
@@ -255,6 +282,7 @@ func sendMailWithContext(ctx context.Context, cfg SMTPConfig, auth smtp.Auth, fr
 		}
 	}
 
+	log.Printf("[smtp] entering DATA phase")
 	wc, err := client.Data()
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -277,11 +305,13 @@ func sendMailWithContext(ctx context.Context, cfg SMTPConfig, auth smtp.Auth, fr
 		}
 		return err
 	}
+	log.Printf("[smtp] DATA phase completed")
 
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr
 	}
 
+	log.Printf("[smtp] smtp transaction finished successfully")
 	return nil
 }
 

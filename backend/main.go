@@ -247,6 +247,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
+	log.Printf("loaded config from %s", configPath)
 
 	dbPath := os.Getenv("PIXEL_DB_PATH")
 	if dbPath == "" {
@@ -284,6 +285,14 @@ func main() {
 	smtpConfigured := false
 	var mailer email.Mailer = email.NewConsoleMailer("Kup Piksel")
 	if cfg.SMTP != nil {
+		log.Printf(
+			"smtp config detected: host=%s port=%d username=%s from_email=%s from_name=%s",
+			cfg.SMTP.Host,
+			cfg.SMTP.Port,
+			cfg.SMTP.Username,
+			cfg.SMTP.FromEmail,
+			cfg.SMTP.FromName,
+		)
 		smtpMailer, err := email.NewSMTPMailer(*cfg.SMTP)
 		if err != nil {
 			log.Printf("failed to initialise smtp mailer: %v", err)
@@ -293,6 +302,8 @@ func main() {
 			smtpConfigured = true
 			log.Printf("smtp mailer enabled for %s", cfg.SMTP.Address())
 		}
+	} else {
+		log.Printf("smtp config missing; using console mailer")
 	}
 
 	server := &Server{
@@ -387,6 +398,8 @@ func (s *Server) handleRegister(c *gin.Context) {
 				return
 			}
 
+			log.Printf("register: existing unverified user found id=%d email=%s", existing.ID, existing.Email)
+
 			token, issueErr := s.issueVerificationToken(c.Request.Context(), existing)
 			if issueErr != nil {
 				log.Printf("issue verification token (duplicate register): %v", issueErr)
@@ -394,12 +407,16 @@ func (s *Server) handleRegister(c *gin.Context) {
 				return
 			}
 
+			log.Printf("register: issued verification token for user_id=%d", existing.ID)
+
 			link, linkErr := buildVerificationLink(s.verificationBaseURL, token)
 			if linkErr != nil {
 				log.Printf("build verification link (duplicate register): %v", linkErr)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 				return
 			}
+
+			log.Printf("register: sending verification email to %s (duplicate register)", existing.Email)
 
 			if sendErr := s.mailer.SendVerificationEmail(c.Request.Context(), existing.Email, link); sendErr != nil {
 				log.Printf("send verification email (duplicate register): %v", sendErr)
@@ -417,6 +434,8 @@ func (s *Server) handleRegister(c *gin.Context) {
 		return
 	}
 
+	log.Printf("register: created new user id=%d email=%s disable_verification_email=%t", user.ID, user.Email, s.disableVerificationEmail)
+
 	if s.disableVerificationEmail {
 		if err := s.store.MarkUserVerified(c.Request.Context(), user.ID); err != nil {
 			log.Printf("auto-verify user: %v", err)
@@ -432,6 +451,8 @@ func (s *Server) handleRegister(c *gin.Context) {
 		return
 	}
 
+	log.Printf("register: issuing verification token for user_id=%d", user.ID)
+
 	token, err := s.issueVerificationToken(c.Request.Context(), user)
 	if err != nil {
 		log.Printf("issue verification token: %v", err)
@@ -439,12 +460,16 @@ func (s *Server) handleRegister(c *gin.Context) {
 		return
 	}
 
+	log.Printf("register: verification token issued for user_id=%d", user.ID)
+
 	link, err := buildVerificationLink(s.verificationBaseURL, token)
 	if err != nil {
 		log.Printf("build verification link: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 		return
 	}
+
+	log.Printf("register: sending verification email to %s", user.Email)
 
 	if err := s.mailer.SendVerificationEmail(c.Request.Context(), user.Email, link); err != nil {
 		log.Printf("send verification email: %v", err)
@@ -493,6 +518,8 @@ func (s *Server) handleLogin(c *gin.Context) {
 			return
 		}
 
+		log.Printf("login: user %d not verified, issuing verification token", user.ID)
+
 		token, err := s.issueVerificationToken(c.Request.Context(), user)
 		if err != nil {
 			log.Printf("issue verification token (login): %v", err)
@@ -500,12 +527,16 @@ func (s *Server) handleLogin(c *gin.Context) {
 			return
 		}
 
+		log.Printf("login: verification token issued for user_id=%d", user.ID)
+
 		link, err := buildVerificationLink(s.verificationBaseURL, token)
 		if err != nil {
 			log.Printf("build verification link (login): %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 			return
 		}
+
+		log.Printf("login: sending verification email to %s", user.Email)
 
 		if err := s.mailer.SendVerificationEmail(c.Request.Context(), user.Email, link); err != nil {
 			log.Printf("send verification email (login): %v", err)
@@ -536,9 +567,12 @@ func (s *Server) issueVerificationToken(ctx context.Context, user sqlite.User) (
 		return "", errors.New("invalid user id")
 	}
 
+	log.Printf("issueVerificationToken: start user_id=%d", user.ID)
+
 	if err := s.store.DeleteVerificationTokensForUser(ctx, user.ID); err != nil {
 		return "", err
 	}
+	log.Printf("issueVerificationToken: cleared previous tokens for user_id=%d", user.ID)
 
 	var token string
 	var err error
@@ -550,12 +584,19 @@ func (s *Server) issueVerificationToken(ctx context.Context, user sqlite.User) (
 		expires := time.Now().Add(s.verificationTokenTTL)
 		_, storeErr := s.store.CreateVerificationToken(ctx, token, user.ID, expires)
 		if storeErr == nil {
+			log.Printf(
+				"issueVerificationToken: stored token for user_id=%d expires_at=%s attempt=%d",
+				user.ID,
+				expires.Format(time.RFC3339),
+				i+1,
+			)
 			return token, nil
 		}
 		if !strings.Contains(strings.ToLower(storeErr.Error()), "token already exists") {
 			return "", storeErr
 		}
 	}
+	log.Printf("issueVerificationToken: failed to create unique token for user_id=%d", user.ID)
 	return "", errors.New("unable to create unique verification token")
 }
 
@@ -637,6 +678,8 @@ func (s *Server) handleResendVerification(c *gin.Context) {
 		return
 	}
 
+	log.Printf("resend: issuing verification token for user_id=%d", user.ID)
+
 	token, err := s.issueVerificationToken(c.Request.Context(), user)
 	if err != nil {
 		log.Printf("issue verification token (resend): %v", err)
@@ -644,12 +687,16 @@ func (s *Server) handleResendVerification(c *gin.Context) {
 		return
 	}
 
+	log.Printf("resend: verification token issued for user_id=%d", user.ID)
+
 	link, err := buildVerificationLink(s.verificationBaseURL, token)
 	if err != nil {
 		log.Printf("build verification link (resend): %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 		return
 	}
+
+	log.Printf("resend: sending verification email to %s", user.Email)
 
 	if err := s.mailer.SendVerificationEmail(c.Request.Context(), user.Email, link); err != nil {
 		log.Printf("send verification email (resend): %v", err)

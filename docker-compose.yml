@@ -10,6 +10,7 @@ services:
     restart: unless-stopped
     volumes:
       - pixel-data:/app/data
+      - ./backend/config.json:/app/config.json:ro
 
 volumes:
   pixel-data:

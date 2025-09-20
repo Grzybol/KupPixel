@@ -23,5 +23,6 @@ FROM alpine:3.19
 WORKDIR /app
 RUN apk add --no-cache sqlite-libs
 COPY --from=backend-builder /app/backend/kup-piksel ./kup-piksel
+COPY backend/config.example.json ./config.json
 EXPOSE 3000
 CMD ["./kup-piksel"]

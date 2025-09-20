@@ -371,7 +371,45 @@ func (s *Server) handleRegister(c *gin.Context) {
 	user, err := s.store.CreateUser(c.Request.Context(), email, string(hash))
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "email already exists") {
-			c.JSON(http.StatusConflict, gin.H{"error": "user already exists"})
+			existing, getErr := s.store.GetUserByEmail(c.Request.Context(), email)
+			if getErr != nil {
+				if errors.Is(getErr, sql.ErrNoRows) {
+					c.JSON(http.StatusConflict, gin.H{"error": "user already exists"})
+					return
+				}
+				log.Printf("get user after duplicate registration: %v", getErr)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create user"})
+				return
+			}
+
+			if existing.IsVerified || s.disableVerificationEmail {
+				c.JSON(http.StatusConflict, gin.H{"error": "user already exists"})
+				return
+			}
+
+			token, issueErr := s.issueVerificationToken(c.Request.Context(), existing)
+			if issueErr != nil {
+				log.Printf("issue verification token (duplicate register): %v", issueErr)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
+				return
+			}
+
+			link, linkErr := buildVerificationLink(s.verificationBaseURL, token)
+			if linkErr != nil {
+				log.Printf("build verification link (duplicate register): %v", linkErr)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
+				return
+			}
+
+			if sendErr := s.mailer.SendVerificationEmail(c.Request.Context(), existing.Email, link); sendErr != nil {
+				log.Printf("send verification email (duplicate register): %v", sendErr)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send verification email"})
+				return
+			}
+
+			c.JSON(http.StatusAccepted, gin.H{
+				"message": "Konto już istnieje. Wysłaliśmy nowy link aktywacyjny na Twój adres e-mail.",
+			})
 			return
 		}
 		log.Printf("create user: %v", err)

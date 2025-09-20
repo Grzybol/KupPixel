@@ -58,7 +58,8 @@ func CompareHashAndPassword(hashedPassword, password []byte) error {
 		return ErrHashTooShort
 	}
 
-	salt := decoded[:saltSize]
+	salt := make([]byte, saltSize)
+	copy(salt, decoded[:saltSize])
 	storedDigest := decoded[saltSize:]
 	digest := sha256.Sum256(append(salt, password...))
 	if subtle.ConstantTimeCompare(storedDigest, digest[:]) != 1 {

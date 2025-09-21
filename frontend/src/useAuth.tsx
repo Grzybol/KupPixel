@@ -14,6 +14,7 @@ export type AuthUser = {
   email: string;
   is_verified?: boolean;
   verified_at?: string | null;
+  points?: number;
   [key: string]: unknown;
 };
 
@@ -47,6 +48,7 @@ type AuthContextValue = {
   closeLoginModal: () => void;
   isLoginModalOpen: boolean;
   loginPrompt: string | null;
+  pixelCostPoints: number | null;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -67,11 +69,23 @@ function parseUser(data: unknown): AuthUser | null {
   return null;
 }
 
+function extractPixelCostPoints(data: unknown): number | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+  const record = data as Record<string, unknown>;
+  if (typeof record.pixel_cost_points === "number" && Number.isFinite(record.pixel_cost_points)) {
+    return record.pixel_cost_points;
+  }
+  return null;
+}
+
 export function AuthProvider({ children }: PropsWithChildren) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [loginPrompt, setLoginPrompt] = useState<string | null>(null);
+  const [pixelCostPoints, setPixelCostPoints] = useState<number | null>(null);
   const loginResolverRef = useRef<((result: boolean) => void) | null>(null);
 
   const closeModal = useCallback(() => {
@@ -91,6 +105,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       if (!response.ok) {
         if (response.status === 401) {
           setUser(null);
+          setPixelCostPoints(null);
           return null;
         }
         const message = await response.text().catch(() => "");
@@ -99,10 +114,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
       const data = await response.json().catch(() => null);
       const parsed = parseUser(data);
       setUser(parsed);
+      const cost = extractPixelCostPoints(data);
+      setPixelCostPoints(cost);
       return parsed;
     } catch (error) {
       console.error("refresh session", error);
       setUser(null);
+      setPixelCostPoints(null);
       throw error;
     } finally {
       setIsLoading(false);
@@ -169,6 +187,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
         throw new Error("Nie udało się odczytać informacji o koncie.");
       }
       setUser(parsed);
+      const cost = extractPixelCostPoints(payload);
+      if (cost !== null) {
+        setPixelCostPoints(cost);
+      }
       setIsLoginModalOpen(false);
       setLoginPrompt(null);
       if (loginResolverRef.current) {
@@ -221,6 +243,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       console.error("logout", error);
     } finally {
       setUser(null);
+      setPixelCostPoints(null);
       closeModal();
     }
   }, [closeModal]);
@@ -244,8 +267,21 @@ export function AuthProvider({ children }: PropsWithChildren) {
       closeLoginModal: closeModal,
       isLoginModalOpen,
       loginPrompt,
+      pixelCostPoints,
     }),
-    [closeModal, ensureAuthenticated, isLoading, isLoginModalOpen, login, loginPrompt, logout, openLoginModal, refresh, user]
+    [
+      closeModal,
+      ensureAuthenticated,
+      isLoading,
+      isLoginModalOpen,
+      login,
+      loginPrompt,
+      logout,
+      openLoginModal,
+      refresh,
+      user,
+      pixelCostPoints,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

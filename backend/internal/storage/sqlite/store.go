@@ -19,7 +19,8 @@ const (
 )
 
 type Store struct {
-	db *sql.DB
+	db            *sql.DB
+	skipPixelSeed bool
 }
 
 type Pixel struct {
@@ -38,6 +39,7 @@ type User struct {
 	CreatedAt    time.Time  `json:"created_at"`
 	IsVerified   bool       `json:"is_verified"`
 	VerifiedAt   *time.Time `json:"verified_at,omitempty"`
+	Points       int64      `json:"points"`
 }
 
 type VerificationToken struct {
@@ -49,6 +51,7 @@ type VerificationToken struct {
 
 var (
 	ErrPixelOwnedByAnotherUser = errors.New("pixel owned by another user")
+	ErrInsufficientPoints      = errors.New("insufficient points")
 )
 
 type PixelState struct {
@@ -128,6 +131,48 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// SetSkipPixelSeed configures the store to skip the initial pixel seeding step during EnsureSchema.
+// This is primarily useful for tests where populating the full grid would be prohibitively slow.
+func (s *Store) SetSkipPixelSeed(skip bool) {
+	if s != nil {
+		s.skipPixelSeed = skip
+	}
+}
+
+// InsertPixel ensures a pixel row exists with the provided attributes. It is intended for tests where
+// the full grid is not populated.
+func (s *Store) InsertPixel(ctx context.Context, pixel Pixel) error {
+	if pixel.ID < 0 || pixel.ID >= TotalPixels {
+		return fmt.Errorf("invalid pixel id: %d", pixel.ID)
+	}
+
+	status := "free"
+	if strings.TrimSpace(pixel.Status) != "" {
+		status = pixel.Status
+	}
+	color := strings.TrimSpace(pixel.Color)
+	url := strings.TrimSpace(pixel.URL)
+
+	ownerValue := "NULL"
+	if pixel.OwnerID != nil {
+		ownerValue = fmt.Sprintf("%d", *pixel.OwnerID)
+	}
+
+	query := fmt.Sprintf(
+		"INSERT OR IGNORE INTO pixels(id, status, color, url, owner_id, updated_at) VALUES (%d, %s, %s, %s, %s, CURRENT_TIMESTAMP)",
+		pixel.ID,
+		quoteLiteral(status),
+		quoteLiteral(color),
+		quoteLiteral(url),
+		ownerValue,
+	)
+
+	if _, err := s.db.ExecContext(ctx, query); err != nil {
+		return fmt.Errorf("insert pixel: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) EnsureSchema(ctx context.Context) (err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -162,7 +207,8 @@ func (s *Store) EnsureSchema(ctx context.Context) (err error) {
                 password_hash TEXT NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 is_verified INTEGER NOT NULL DEFAULT 0,
-                verified_at TIMESTAMP
+                verified_at TIMESTAMP,
+                user_points INTEGER NOT NULL DEFAULT 0
         )`); execErr != nil {
 		err = fmt.Errorf("create users table: %w", execErr)
 		return err
@@ -174,6 +220,18 @@ func (s *Store) EnsureSchema(ctx context.Context) (err error) {
 
 	if _, execErr := tx.ExecContext(ctx, `ALTER TABLE users ADD COLUMN verified_at TIMESTAMP`); execErr != nil {
 		// ignore - column may already exist
+	}
+
+	if _, execErr := tx.ExecContext(ctx, `ALTER TABLE users ADD COLUMN user_points INTEGER NOT NULL DEFAULT 0`); execErr != nil {
+		// ignore - column may already exist
+	}
+
+	if _, execErr := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS activation_codes (
+                code TEXT PRIMARY KEY,
+                value INTEGER NOT NULL
+        )`); execErr != nil {
+		err = fmt.Errorf("create activation_codes table: %w", execErr)
+		return err
 	}
 
 	if _, execErr := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS verification_tokens (
@@ -203,7 +261,7 @@ func (s *Store) EnsureSchema(ctx context.Context) (err error) {
 		return err
 	}
 
-	if count == 0 {
+	if count == 0 && !s.skipPixelSeed {
 		for i := 0; i < TotalPixels; i++ {
 			if ctx.Err() != nil {
 				err = ctx.Err()
@@ -349,17 +407,21 @@ func (s *Store) UpdatePixel(ctx context.Context, pixel Pixel) (updated Pixel, er
 	return updated, nil
 }
 
-func (s *Store) UpdatePixelForUser(ctx context.Context, userID int64, pixel Pixel) (Pixel, error) {
+func (s *Store) UpdatePixelForUserWithCost(ctx context.Context, userID int64, pixel Pixel, cost int64) (updated Pixel, updatedUser User, err error) {
 	if userID <= 0 {
-		return Pixel{}, errors.New("invalid user id")
+		return Pixel{}, User{}, errors.New("invalid user id")
 	}
 	if pixel.ID < 0 || pixel.ID >= TotalPixels {
-		return Pixel{}, fmt.Errorf("invalid pixel id: %d", pixel.ID)
+		return Pixel{}, User{}, fmt.Errorf("invalid pixel id: %d", pixel.ID)
+	}
+	if cost < 0 {
+		return Pixel{}, User{}, errors.New("cost must not be negative")
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	var tx *sql.Tx
+	tx, err = s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return Pixel{}, fmt.Errorf("begin update pixel for user: %w", err)
+		return Pixel{}, User{}, fmt.Errorf("begin update pixel for user: %w", err)
 	}
 	defer func() {
 		if err != nil {
@@ -367,24 +429,43 @@ func (s *Store) UpdatePixelForUser(ctx context.Context, userID int64, pixel Pixe
 		}
 	}()
 
-	query := fmt.Sprintf("SELECT owner_id FROM pixels WHERE id = %d", pixel.ID)
-	row := tx.QueryRowContext(ctx, query)
-	var currentOwner sql.NullInt64
-	if err := row.Scan(&currentOwner); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return Pixel{}, sql.ErrNoRows
+	pointsQuery := fmt.Sprintf("SELECT user_points FROM users WHERE id = %d", userID)
+	var currentPoints int64
+	if scanErr := tx.QueryRowContext(ctx, pointsQuery).Scan(&currentPoints); scanErr != nil {
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			err = sql.ErrNoRows
+			return Pixel{}, User{}, err
 		}
-		return Pixel{}, fmt.Errorf("load current pixel state: %w", err)
+		err = fmt.Errorf("load user points: %w", scanErr)
+		return Pixel{}, User{}, err
 	}
 
-	updated := Pixel{ID: pixel.ID}
+	ownerQuery := fmt.Sprintf("SELECT owner_id FROM pixels WHERE id = %d", pixel.ID)
+	row := tx.QueryRowContext(ctx, ownerQuery)
+	var currentOwner sql.NullInt64
+	if scanErr := row.Scan(&currentOwner); scanErr != nil {
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			err = sql.ErrNoRows
+			return Pixel{}, User{}, err
+		}
+		err = fmt.Errorf("load current pixel state: %w", scanErr)
+		return Pixel{}, User{}, err
+	}
+
+	updated = Pixel{ID: pixel.ID}
+	chargeCost := false
 
 	if strings.EqualFold(pixel.Status, "taken") {
 		if pixel.Color == "" || pixel.URL == "" {
-			return Pixel{}, errors.New("taken pixels require color and url")
+			err = errors.New("taken pixels require color and url")
+			return Pixel{}, User{}, err
 		}
 		if currentOwner.Valid && currentOwner.Int64 != userID {
-			return Pixel{}, ErrPixelOwnedByAnotherUser
+			err = ErrPixelOwnedByAnotherUser
+			return Pixel{}, User{}, err
+		}
+		if !currentOwner.Valid || currentOwner.Int64 != userID {
+			chargeCost = cost > 0
 		}
 		updated.Status = "taken"
 		updated.Color = pixel.Color
@@ -393,12 +474,36 @@ func (s *Store) UpdatePixelForUser(ctx context.Context, userID int64, pixel Pixe
 		updated.OwnerID = &owner
 	} else {
 		if currentOwner.Valid && currentOwner.Int64 != userID {
-			return Pixel{}, ErrPixelOwnedByAnotherUser
+			err = ErrPixelOwnedByAnotherUser
+			return Pixel{}, User{}, err
 		}
 		updated.Status = "free"
 		updated.Color = ""
 		updated.URL = ""
 		updated.OwnerID = nil
+	}
+
+	if chargeCost {
+		if currentPoints < cost {
+			err = ErrInsufficientPoints
+			return Pixel{}, User{}, err
+		}
+		chargeQuery := fmt.Sprintf("UPDATE users SET user_points = user_points - %d WHERE id = %d AND user_points >= %d", cost, userID, cost)
+		res, execErr := tx.ExecContext(ctx, chargeQuery)
+		if execErr != nil {
+			err = fmt.Errorf("deduct user points: %w", execErr)
+			return Pixel{}, User{}, err
+		}
+		affected, affErr := res.RowsAffected()
+		if affErr != nil {
+			err = fmt.Errorf("deduct user points rows affected: %w", affErr)
+			return Pixel{}, User{}, err
+		}
+		if affected == 0 {
+			err = ErrInsufficientPoints
+			return Pixel{}, User{}, err
+		}
+		currentPoints -= cost
 	}
 
 	updated.UpdatedAt = time.Now().UTC()
@@ -420,24 +525,41 @@ func (s *Store) UpdatePixelForUser(ctx context.Context, userID int64, pixel Pixe
 		updated.ID,
 	)
 
-	res, err := tx.ExecContext(ctx, updateQuery)
-	if err != nil {
-		return Pixel{}, fmt.Errorf("update pixel for user: %w", err)
+	res, execErr := tx.ExecContext(ctx, updateQuery)
+	if execErr != nil {
+		err = fmt.Errorf("update pixel for user: %w", execErr)
+		return Pixel{}, User{}, err
 	}
 
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return Pixel{}, fmt.Errorf("rows affected: %w", err)
+	affected, affErr := res.RowsAffected()
+	if affErr != nil {
+		err = fmt.Errorf("rows affected: %w", affErr)
+		return Pixel{}, User{}, err
 	}
 	if affected == 0 {
-		return Pixel{}, sql.ErrNoRows
+		err = sql.ErrNoRows
+		return Pixel{}, User{}, err
 	}
 
-	if err = tx.Commit(); err != nil {
-		return Pixel{}, fmt.Errorf("commit update pixel for user: %w", err)
+	userQuery := fmt.Sprintf("SELECT id, email, password_hash, created_at, is_verified, verified_at, user_points FROM users WHERE id = %d", userID)
+	userRow := tx.QueryRowContext(ctx, userQuery)
+	updatedUser, scanErr := scanUser(userRow)
+	if scanErr != nil {
+		err = scanErr
+		return Pixel{}, User{}, err
 	}
 
-	return updated, nil
+	if commitErr := tx.Commit(); commitErr != nil {
+		err = fmt.Errorf("commit update pixel for user: %w", commitErr)
+		return Pixel{}, User{}, err
+	}
+
+	return updated, updatedUser, nil
+}
+
+func (s *Store) UpdatePixelForUser(ctx context.Context, userID int64, pixel Pixel) (Pixel, error) {
+	updated, _, err := s.UpdatePixelForUserWithCost(ctx, userID, pixel, 0)
+	return updated, err
 }
 
 func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (User, error) {
@@ -469,7 +591,7 @@ func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (Use
 		return User{}, fmt.Errorf("last insert id: %w", err)
 	}
 
-	user := User{ID: id, Email: email, PasswordHash: passwordHash, CreatedAt: time.Now().UTC(), IsVerified: false}
+	user := User{ID: id, Email: email, PasswordHash: passwordHash, CreatedAt: time.Now().UTC(), IsVerified: false, Points: 0}
 	return user, nil
 }
 
@@ -480,20 +602,46 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (User, error) 
 	}
 
 	query := fmt.Sprintf(
-		"SELECT id, email, password_hash, created_at, is_verified, verified_at FROM users WHERE email = %s",
+		"SELECT id, email, password_hash, created_at, is_verified, verified_at, user_points FROM users WHERE email = %s",
 		quoteLiteral(email),
 	)
 
 	row := s.db.QueryRowContext(ctx, query)
+	user, err := scanUser(row)
+	if err != nil {
+		return User{}, err
+	}
+	return user, nil
+}
+
+func (s *Store) GetUserByID(ctx context.Context, id int64) (User, error) {
+	if id <= 0 {
+		return User{}, errors.New("invalid user id")
+	}
+
+	query := fmt.Sprintf("SELECT id, email, password_hash, created_at, is_verified, verified_at, user_points FROM users WHERE id = %d", id)
+	row := s.db.QueryRowContext(ctx, query)
+	user, err := scanUser(row)
+	if err != nil {
+		return User{}, err
+	}
+	return user, nil
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanUser(row rowScanner) (User, error) {
 	var user User
 	var created string
 	var isVerified int64
 	var verified sql.NullString
-	if err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &created, &isVerified, &verified); err != nil {
+	if err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &created, &isVerified, &verified, &user.Points); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return User{}, sql.ErrNoRows
 		}
-		return User{}, fmt.Errorf("scan user by email: %w", err)
+		return User{}, fmt.Errorf("scan user: %w", err)
 	}
 
 	parsed, err := parseUpdatedAt(created)
@@ -512,38 +660,107 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (User, error) 
 	return user, nil
 }
 
-func (s *Store) GetUserByID(ctx context.Context, id int64) (User, error) {
-	if id <= 0 {
-		return User{}, errors.New("invalid user id")
+func (s *Store) CreateActivationCode(ctx context.Context, code string, value int64) error {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return errors.New("activation code must not be empty")
+	}
+	if value <= 0 {
+		return errors.New("activation code value must be positive")
 	}
 
-	query := fmt.Sprintf("SELECT id, email, password_hash, created_at, is_verified, verified_at FROM users WHERE id = %d", id)
-	row := s.db.QueryRowContext(ctx, query)
-	var user User
-	var created string
-	var isVerified int64
-	var verified sql.NullString
-	if err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &created, &isVerified, &verified); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return User{}, sql.ErrNoRows
+	query := fmt.Sprintf(
+		"INSERT INTO activation_codes(code, value) VALUES (%s, %d)",
+		quoteLiteral(strings.ToUpper(code)),
+		value,
+	)
+
+	if _, err := s.db.ExecContext(ctx, query); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return fmt.Errorf("activation code already exists: %w", err)
 		}
-		return User{}, fmt.Errorf("scan user by id: %w", err)
+		return fmt.Errorf("insert activation code: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) RedeemActivationCode(ctx context.Context, userID int64, code string) (User, int64, error) {
+	if userID <= 0 {
+		return User{}, 0, errors.New("invalid user id")
+	}
+	normalized := strings.ToUpper(strings.TrimSpace(code))
+	if normalized == "" {
+		return User{}, 0, errors.New("activation code must not be empty")
 	}
 
-	parsed, err := parseUpdatedAt(created)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return User{}, fmt.Errorf("parse created_at: %w", err)
+		return User{}, 0, fmt.Errorf("begin redeem activation code: %w", err)
 	}
-	user.CreatedAt = parsed
-	user.IsVerified = isVerified != 0
-	if verified.Valid && strings.TrimSpace(verified.String) != "" {
-		parsedVerified, parseErr := parseUpdatedAt(verified.String)
-		if parseErr != nil {
-			return User{}, fmt.Errorf("parse verified_at: %w", parseErr)
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
 		}
-		user.VerifiedAt = &parsedVerified
+	}()
+
+	selectQuery := fmt.Sprintf("SELECT value FROM activation_codes WHERE code = %s", quoteLiteral(normalized))
+	row := tx.QueryRowContext(ctx, selectQuery)
+	var value int64
+	if scanErr := row.Scan(&value); scanErr != nil {
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			err = sql.ErrNoRows
+			return User{}, 0, err
+		}
+		err = fmt.Errorf("load activation code: %w", scanErr)
+		return User{}, 0, err
 	}
-	return user, nil
+
+	deleteQuery := fmt.Sprintf("DELETE FROM activation_codes WHERE code = %s", quoteLiteral(normalized))
+	res, execErr := tx.ExecContext(ctx, deleteQuery)
+	if execErr != nil {
+		err = fmt.Errorf("delete activation code: %w", execErr)
+		return User{}, 0, err
+	}
+	affected, affErr := res.RowsAffected()
+	if affErr != nil {
+		err = fmt.Errorf("activation code rows affected: %w", affErr)
+		return User{}, 0, err
+	}
+	if affected == 0 {
+		err = sql.ErrNoRows
+		return User{}, 0, err
+	}
+
+	updateQuery := fmt.Sprintf("UPDATE users SET user_points = user_points + %d WHERE id = %d", value, userID)
+	res, execErr = tx.ExecContext(ctx, updateQuery)
+	if execErr != nil {
+		err = fmt.Errorf("update user points: %w", execErr)
+		return User{}, 0, err
+	}
+	affected, affErr = res.RowsAffected()
+	if affErr != nil {
+		err = fmt.Errorf("user points rows affected: %w", affErr)
+		return User{}, 0, err
+	}
+	if affected == 0 {
+		err = sql.ErrNoRows
+		return User{}, 0, err
+	}
+
+	userQuery := fmt.Sprintf("SELECT id, email, password_hash, created_at, is_verified, verified_at, user_points FROM users WHERE id = %d", userID)
+	userRow := tx.QueryRowContext(ctx, userQuery)
+	updatedUser, scanErr := scanUser(userRow)
+	if scanErr != nil {
+		err = scanErr
+		return User{}, 0, err
+	}
+
+	if commitErr := tx.Commit(); commitErr != nil {
+		err = fmt.Errorf("commit redeem activation code: %w", commitErr)
+		return User{}, 0, err
+	}
+
+	return updatedUser, value, nil
 }
 
 func (s *Store) CreateVerificationToken(ctx context.Context, token string, userID int64, expiresAt time.Time) (VerificationToken, error) {

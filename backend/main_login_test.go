@@ -28,6 +28,8 @@ func TestHandleLogin_UnverifiedResendsVerificationEmail(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
+	store.SetSkipPixelSeed(true)
+
 	if err := store.EnsureSchema(context.Background()); err != nil {
 		t.Fatalf("ensure schema: %v", err)
 	}
@@ -56,6 +58,7 @@ func TestHandleLogin_UnverifiedResendsVerificationEmail(t *testing.T) {
 		mailer:               mailer,
 		verificationBaseURL:  "http://example.com",
 		verificationTokenTTL: time.Hour,
+		pixelCostPoints:      10,
 	}
 
 	body := bytes.NewBufferString(`{"email":"user@example.com","password":"` + testLoginPassword + `"}`)
@@ -104,6 +107,8 @@ func TestHandleLogin_UnverifiedWhenVerificationDisabled(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
+	store.SetSkipPixelSeed(true)
+
 	if err := store.EnsureSchema(context.Background()); err != nil {
 		t.Fatalf("ensure schema: %v", err)
 	}
@@ -132,6 +137,7 @@ func TestHandleLogin_UnverifiedWhenVerificationDisabled(t *testing.T) {
 		verificationBaseURL:      "http://example.com",
 		verificationTokenTTL:     time.Hour,
 		disableVerificationEmail: true,
+		pixelCostPoints:          10,
 	}
 
 	body := bytes.NewBufferString(`{"email":"user@example.com","password":"` + testLoginPassword + `"}`)

@@ -68,9 +68,13 @@ function formatDate(value?: string) {
   }).format(parsed);
 }
 
-export default function AccountPage() {
+type AccountPageProps = {
+  onOpenActivationCode?: () => void;
+};
+
+export default function AccountPage({ onOpenActivationCode }: AccountPageProps = {}) {
   const navigate = useNavigate();
-  const { user, isLoading: isAuthLoading, openLoginModal, refresh } = useAuth();
+  const { user, isLoading: isAuthLoading, openLoginModal, refresh, pixelCostPoints } = useAuth();
   const [accountUser, setAccountUser] = useState<AuthUser | null>(null);
   const [pixels, setPixels] = useState<AccountPixel[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -80,6 +84,7 @@ export default function AccountPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [accountPixelCost, setAccountPixelCost] = useState<number | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -116,16 +121,23 @@ export default function AccountPage() {
         throw new Error(message || `Nie udało się pobrać danych konta (${response.status}).`);
       }
       const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
-      if (payload && "user" in payload) {
-        const parsedUser = parseAccountUser((payload as Record<string, unknown>).user);
+      let parsedPixels: AccountPixel[] = [];
+      if (payload) {
+        const record = payload as Record<string, unknown>;
+        const costValue = record["pixel_cost_points"];
+        if (typeof costValue === "number" && Number.isFinite(costValue)) {
+          setAccountPixelCost(costValue);
+        }
+        const payloadUser = record["user"];
+        const parsedUser = parseAccountUser(payloadUser);
         if (parsedUser) {
           setAccountUser(parsedUser);
           if (!user) {
             await refresh().catch(() => undefined);
           }
         }
+        parsedPixels = parseAccountPixels(record["pixels"]);
       }
-      const parsedPixels = payload ? parseAccountPixels((payload as Record<string, unknown>).pixels) : [];
       setPixels(parsedPixels);
     } catch (accountError) {
       console.error(accountError);
@@ -144,7 +156,46 @@ export default function AccountPage() {
     void loadAccount();
   }, [loadAccount, user]);
 
+  useEffect(() => {
+    if (typeof pixelCostPoints === "number" && Number.isFinite(pixelCostPoints)) {
+      setAccountPixelCost(pixelCostPoints);
+    }
+  }, [pixelCostPoints]);
+
   const currentUserEmail = useMemo(() => accountUser?.email ?? user?.email ?? "", [accountUser, user]);
+
+  const pointsBalance = useMemo(() => {
+    if (typeof accountUser?.points === "number" && Number.isFinite(accountUser.points)) {
+      return accountUser.points;
+    }
+    if (typeof user?.points === "number" && Number.isFinite(user.points)) {
+      return user.points;
+    }
+    return 0;
+  }, [accountUser, user]);
+
+  const effectivePixelCost = useMemo(() => {
+    if (typeof accountPixelCost === "number" && Number.isFinite(accountPixelCost)) {
+      return accountPixelCost;
+    }
+    if (typeof pixelCostPoints === "number" && Number.isFinite(pixelCostPoints)) {
+      return pixelCostPoints;
+    }
+    return null;
+  }, [accountPixelCost, pixelCostPoints]);
+
+  const handleOpenActivation = useCallback(() => {
+    if (onOpenActivationCode) {
+      onOpenActivationCode();
+    }
+  }, [onOpenActivationCode]);
+
+  const handleRefreshAccount = useCallback(() => {
+    void (async () => {
+      await refresh().catch(() => undefined);
+      await loadAccount();
+    })();
+  }, [loadAccount, refresh]);
 
   const handleStartEdit = useCallback(
     (pixel: AccountPixel) => {
@@ -215,12 +266,21 @@ export default function AccountPage() {
         throw new Error(message || `Nie udało się zaktualizować piksela (${response.status}).`);
       }
       const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+      const payloadPixel =
+        payload && typeof payload.pixel === "object" && payload.pixel
+          ? (payload.pixel as Record<string, unknown>)
+          : payload ?? {};
       const updatedPixel: AccountPixel = {
         id: pixel.id,
-        status: typeof payload?.status === "string" ? (payload.status as string) : pixel.status,
-        color: typeof payload?.color === "string" ? (payload.color as string) : pixel.color,
-        url: typeof payload?.url === "string" ? (payload.url as string) : normalizedUrl,
-        updated_at: typeof payload?.updated_at === "string" ? (payload.updated_at as string) : payload?.updated_at ? String(payload.updated_at) : pixel.updated_at,
+        status: typeof payloadPixel?.status === "string" ? (payloadPixel.status as string) : pixel.status,
+        color: typeof payloadPixel?.color === "string" ? (payloadPixel.color as string) : pixel.color,
+        url: typeof payloadPixel?.url === "string" ? (payloadPixel.url as string) : normalizedUrl,
+        updated_at:
+          typeof payloadPixel?.updated_at === "string"
+            ? (payloadPixel.updated_at as string)
+            : payloadPixel && payloadPixel.updated_at
+              ? String(payloadPixel.updated_at)
+              : pixel.updated_at,
       };
       setPixels((prev) => prev.map((item) => (item.id === pixel.id ? updatedPixel : item)));
       setEditingId(null);
@@ -247,6 +307,45 @@ export default function AccountPage() {
             </p>
           )}
         </header>
+
+        <section className="grid gap-4 rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl sm:grid-cols-2 lg:grid-cols-3">
+          <div className="rounded-2xl border border-slate-800/60 bg-slate-950/60 p-4">
+            <p className="text-sm font-semibold text-slate-100">Saldo punktów</p>
+            <p className="mt-2 text-2xl font-bold text-emerald-400">{pointsBalance} pkt</p>
+            <p className="mt-1 text-xs text-slate-400">Aktywuj kody, aby zdobyć więcej punktów i zajmować kolejne piksele.</p>
+          </div>
+          <div className="rounded-2xl border border-slate-800/60 bg-slate-950/60 p-4">
+            <p className="text-sm font-semibold text-slate-100">Koszt jednego piksela</p>
+            <p className="mt-2 text-2xl font-bold text-slate-200">
+              {typeof effectivePixelCost === "number" && effectivePixelCost > 0 ? `${effectivePixelCost} pkt` : "Brak danych"}
+            </p>
+            <p className="mt-1 text-xs text-slate-400">Do zajęcia nowego piksela potrzebujesz co najmniej tylu punktów.</p>
+          </div>
+          <div className="flex flex-col justify-between gap-3 rounded-2xl border border-slate-800/60 bg-slate-950/60 p-4">
+            <div>
+              <p className="text-sm font-semibold text-slate-100">Zarządzaj saldem</p>
+              <p className="mt-1 text-xs text-slate-400">Aktywuj kod lub odśwież dane, aby zobaczyć aktualne punkty.</p>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              {onOpenActivationCode && (
+                <button
+                  type="button"
+                  onClick={handleOpenActivation}
+                  className="flex-1 rounded-full bg-emerald-500/80 px-4 py-2 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400"
+                >
+                  Aktywuj kod
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleRefreshAccount}
+                className="flex-1 rounded-full bg-slate-800/80 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-700"
+              >
+                Odśwież dane
+              </button>
+            </div>
+          </div>
+        </section>
 
         <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

@@ -55,6 +55,23 @@ Możesz uruchomić frontend i backend osobno, aby mieć szybkie odświeżanie ko
    ```
    Backend nasłuchuje na `http://localhost:3000`.
 
+#### Konfiguracja backendu
+
+Ustawienia serwera znajdują się w pliku `backend/config.json` (format JSON/JSON5). Możesz rozpocząć od skopiowania przykładu:
+
+```bash
+cp backend/config.example.json backend/config.json
+```
+
+Najważniejsze parametry:
+
+- `disableVerificationEmail` – ustaw na `true`, jeśli w środowisku testowym chcesz pomijać wysyłkę maili i automatycznie weryfikować konta.
+- `smtp` – sekcja z danymi serwera SMTP (`host`, `port`, `username`, `password`, `fromEmail`, `fromName`). Pozostaw pustą lub usuń, aby backend korzystał z trybu konsolowego (link w logach).
+
+Ścieżkę do pliku konfiguracyjnego można nadpisać zmienną środowiskową `PIXEL_CONFIG_PATH`. To przydatne np. w Dockerze lub podczas uruchamiania wielu instancji.
+
+> 💡 Do lokalnych testów SMTP polecamy [MailHog](https://github.com/mailhog/MailHog): `docker run --rm -p 1025:1025 -p 8025:8025 mailhog/mailhog`. Skonfiguruj `host` = `localhost`, `port` = `1025`, a odebrane wiadomości zobaczysz w przeglądarce pod `http://localhost:8025`.
+
 ### 3.2 Frontend (Vite)
 1. Zainstaluj paczki NPM:
    ```bash
@@ -75,6 +92,15 @@ Możesz uruchomić frontend i backend osobno, aby mieć szybkie odświeżanie ko
        -H "Content-Type: application/json" \
        -d '{"id":42,"status":"taken","color":"#123456","url":"https://example.com"}'
   ```
+- **Test wysyłki e-mail**: po uzupełnieniu sekcji `smtp` w pliku konfiguracyjnym zarejestruj konto testowe:
+  ```bash
+  curl -X POST http://localhost:3000/api/register \
+       -H "Content-Type: application/json" \
+       -d '{"email":"test@example.com","password":"Test1234!"}'
+  ```
+  W logach serwera (ConsoleMailer) lub w panelu MailHog zobaczysz wiadomość aktywacyjną z linkiem weryfikacyjnym.
+- **Ponowna rejestracja**: jeśli konto z tym adresem e-mail istnieje, ale nie zostało jeszcze potwierdzone, backend automatycznie wyśle nowy link aktywacyjny (zamiast zgłaszać błąd). Zweryfikowane konta nadal zwracają odpowiedź 409.
+- **Logowanie przed weryfikacją**: próba zalogowania niezweryfikowanego konta również powoduje ponowną wysyłkę linku weryfikacyjnego i blokuje logowanie do czasu potwierdzenia adresu.
 
 > ℹ️ Po zmianie frontendu warto wykonać `npm run build` (patrz sekcja 4), by upewnić się że kompilacja produkcyjna przechodzi bez błędów.
 

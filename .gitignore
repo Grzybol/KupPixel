@@ -3,6 +3,9 @@ frontend/node_modules
 backend/frontend_dist/*
 !backend/frontend_dist/index.html
 !backend/frontend_dist/.keep
+!backend/frontend_dist/assets/
+!backend/frontend_dist/assets/**
 frontend/dist
+backend/data/
 .env
 .DS_Store

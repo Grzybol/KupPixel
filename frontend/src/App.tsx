@@ -1,6 +1,11 @@
 import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import PixelCanvas, { Pixel } from "./components/PixelCanvas";
+import LoginModal from "./components/LoginModal";
+import RegisterModal from "./components/RegisterModal";
+import VerifyAccountPage from "./components/VerifyAccountPage";
+import AccountPage from "./components/AccountPage";
+import { useAuth } from "./useAuth";
 
 type PixelResponse = {
   width: number;
@@ -9,6 +14,7 @@ type PixelResponse = {
 };
 
 function usePixels() {
+  const { user, openLoginModal } = useAuth();
   const [data, setData] = useState<PixelResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -18,9 +24,22 @@ function usePixels() {
     const fetchPixels = async () => {
       setLoading(true);
       try {
-        const response = await fetch("/api/pixels");
+        const response = await fetch("/api/pixels", {
+          credentials: "include",
+        });
         if (!response.ok) {
-          throw new Error(`Błąd API: ${response.status}`);
+          if (response.status === 401) {
+            if (!ignore) {
+              setData(null);
+              setError("Aby zobaczyć tablicę pikseli, zaloguj się.");
+            }
+            void openLoginModal({
+              message: "Twoja sesja wygasła. Zaloguj się, aby ponownie zobaczyć tablicę.",
+            });
+            return;
+          }
+          const message = await response.text().catch(() => "");
+          throw new Error(message || `Błąd API: ${response.status}`);
         }
         const json = (await response.json()) as PixelResponse;
         if (!ignore) {
@@ -30,7 +49,8 @@ function usePixels() {
       } catch (err) {
         console.error(err);
         if (!ignore) {
-          setError("Nie udało się pobrać stanu pikseli.");
+          const message = err instanceof Error ? err.message : "Nie udało się pobrać stanu pikseli.";
+          setError(message);
         }
       } finally {
         if (!ignore) {
@@ -43,24 +63,35 @@ function usePixels() {
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [openLoginModal, user]);
 
   return { data, loading, error } as const;
 }
 
-function LandingPage() {
+type LandingPageProps = {
+  onOpenRegister: () => void;
+};
+
+function LandingPage({ onOpenRegister }: LandingPageProps) {
   const navigate = useNavigate();
   const { data, loading, error } = usePixels();
+  const { user, ensureAuthenticated, openLoginModal, logout } = useAuth();
 
   const handlePixelClick = useCallback(
-    (pixel: Pixel) => {
+    async (pixel: Pixel) => {
       if (pixel.status === "taken" && pixel.url) {
         window.open(pixel.url, "_blank");
         return;
       }
+      const authenticated = await ensureAuthenticated({
+        message: "Zaloguj się, aby kupić wybrany piksel.",
+      });
+      if (!authenticated) {
+        return;
+      }
       navigate(`/buy/${pixel.id}`);
     },
-    [navigate]
+    [ensureAuthenticated, navigate]
   );
 
   const heroStats = useMemo(() => {
@@ -82,6 +113,47 @@ function LandingPage() {
         <div className="mt-4 flex items-center justify-center gap-6 text-sm text-slate-400">
           <span className="font-semibold text-slate-200">Zajęte: {heroStats.taken}</span>
           <span className="font-semibold text-slate-200">Wolne: {heroStats.free}</span>
+        </div>
+        <div className="mt-6 flex items-center justify-center gap-4 text-sm text-slate-300">
+          {user ? (
+            <>
+              <span className="rounded-full bg-slate-800/80 px-4 py-2 text-slate-200">
+                Zalogowano jako <span className="font-semibold">{user.email}</span>
+              </span>
+              <Link
+                to="/account"
+                className="rounded-full bg-slate-800/70 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-700"
+              >
+                Twoje konto
+              </Link>
+              <button
+                type="button"
+                onClick={() => void logout()}
+                className="rounded-full bg-slate-800/70 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-700"
+              >
+                Wyloguj
+              </button>
+            </>
+          ) : (
+            <div className="flex flex-col items-stretch gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={onOpenRegister}
+                className="rounded-full bg-blue-500 px-6 py-2 font-semibold text-white shadow-lg transition hover:bg-blue-400"
+              >
+                Załóż konto
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void openLoginModal({ message: "Zaloguj się, aby rozpocząć." });
+                }}
+                className="rounded-full bg-slate-800/70 px-6 py-2 font-semibold text-slate-200 transition hover:bg-slate-700"
+              >
+                Zaloguj się
+              </button>
+            </div>
+          )}
         </div>
       </header>
       <main className="mx-auto flex max-w-5xl flex-col items-center gap-6 px-4 pb-16">
@@ -105,6 +177,7 @@ function LandingPage() {
 
 function BuyPixelPage() {
   const { pixelId } = useParams<{ pixelId: string }>();
+  const { ensureAuthenticated, openLoginModal } = useAuth();
   const id = useMemo(() => {
     if (!pixelId) return null;
     const parsed = Number(pixelId);
@@ -140,15 +213,26 @@ function BuyPixelPage() {
     setPurchaseError(null);
 
     try {
+      const authenticated = await ensureAuthenticated({
+        message: "Zaloguj się, aby kupić ten piksel.",
+      });
+      if (!authenticated) {
+        throw new Error("Aby kontynuować, zaloguj się.");
+      }
       const response = await fetch("/api/pixels", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "include",
         body: JSON.stringify({ id, status: "taken", color: selectedColor, url }),
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          void openLoginModal({ message: "Zaloguj się ponownie, aby sfinalizować zakup." });
+          throw new Error("Twoja sesja wygasła. Zaloguj się ponownie.");
+        }
         const message = await response.text().catch(() => null);
         throw new Error(message || `Błąd API: ${response.status}`);
       }
@@ -156,11 +240,12 @@ function BuyPixelPage() {
       setPurchaseStatus("success");
     } catch (error) {
       console.error(error);
-      setPurchaseError("Nie udało się zarezerwować piksela. Spróbuj ponownie.");
+      const message = error instanceof Error ? error.message : "Nie udało się zarezerwować piksela. Spróbuj ponownie.";
+      setPurchaseError(message);
     } finally {
       setIsProcessing(false);
     }
-  }, [id, selectedColor, url]);
+  }, [ensureAuthenticated, id, openLoginModal, selectedColor, url]);
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center px-6 py-12 text-center">
@@ -289,21 +374,48 @@ function BuyPixelPage() {
 }
 
 export default function App() {
+  const { openLoginModal } = useAuth();
+  const [isRegisterOpen, setIsRegisterOpen] = useState(false);
+
+  const handleOpenRegister = useCallback(() => {
+    setIsRegisterOpen(true);
+  }, []);
+
+  const handleCloseRegister = useCallback(() => {
+    setIsRegisterOpen(false);
+  }, []);
+
+  const handleOpenLoginFromRegister = useCallback(() => {
+    void openLoginModal({ message: "Zaloguj się, aby rozpocząć." });
+  }, [openLoginModal]);
+
   return (
-    <Routes>
-      <Route path="/" element={<LandingPage />} />
-      <Route path="/buy/:pixelId" element={<BuyPixelPage />} />
-      <Route
-        path="*"
-        element={
-          <div className="flex min-h-screen flex-col items-center justify-center gap-3 text-center text-slate-300">
-            <h2 className="text-2xl font-semibold text-white">Ups! Nie znaleziono strony.</h2>
-            <Link to="/" className="text-blue-400 underline">
-              Wróć na tablicę pikseli
-            </Link>
-          </div>
-        }
+    <>
+      <Routes>
+        <Route path="/" element={<LandingPage onOpenRegister={handleOpenRegister} />} />
+        <Route path="/account" element={<AccountPage />} />
+        <Route path="/verify" element={<VerifyAccountPage />} />
+        <Route path="/buy/:pixelId" element={<BuyPixelPage />} />
+        <Route
+          path="*"
+          element={
+            <div className="flex min-h-screen flex-col items-center justify-center gap-3 text-center text-slate-300">
+              <h2 className="text-2xl font-semibold text-white">Ups! Nie znaleziono strony.</h2>
+              <Link to="/" className="text-blue-400 underline">
+                Wróć na tablicę pikseli
+              </Link>
+            </div>
+          }
+        />
+      </Routes>
+      <LoginModal />
+      <RegisterModal
+        isOpen={isRegisterOpen}
+        onClose={handleCloseRegister}
+        onOpenLogin={() => {
+          handleOpenLoginFromRegister();
+        }}
       />
-    </Routes>
+    </>
   );
 }

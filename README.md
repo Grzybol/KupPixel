@@ -24,15 +24,29 @@ Każdy piksel można kliknąć, zobaczyć czy jest wolny czy zajęty i w przysz�
 
 ## 🏗 Architektura
 
-- **Frontend**: React + TypeScript + Tailwind CSS  
-- **Backend**: Go (Gin framework) – API REST do obsługi pikseli  
+- **Frontend**: React + TypeScript + Tailwind CSS
+- **Backend**: Go (Gin framework) – API REST do obsługi pikseli
 - **Baza danych**: SQLite (plik tworzony domyślnie pod `backend/data/pixels.db`, można zmienić ścieżkę zmienną `PIXEL_DB_PATH`)
 - **Docker**: multi-stage build → jeden image z frontendem i backendem
 - **Nginx/Reverse Proxy**: opcjonalnie do hostingu na VPS + SSL
+
+### ✉️ Konfiguracja backendu
+
+Backend odczytuje ustawienia z pliku `config.json` (domyślnie w katalogu `backend/`, ścieżkę można nadpisać zmienną `PIXEL_CONFIG_PATH`). Format pliku to JSON/JSON5 – możesz korzystać z komentarzy i końcowych przecinków. Przykładowy plik znajdziesz pod `backend/config.example.json`.
+
+Kluczowe opcje:
+
+| Pole | Opis |
+| --- | --- |
+| `disableVerificationEmail` | Po ustawieniu na `true` nowi użytkownicy są automatycznie oznaczani jako zweryfikowani i nie są wysyłane żadne maile. |
+| `smtp` | (Opcjonalnie) konfiguracja transportu SMTP oparta na polach `host`, `port`, `username`, `password`, `fromEmail`, `fromName`. |
+
+Jeżeli sekcja `smtp` jest pominięta lub pusta, backend pozostaje w trybie developerskim – link aktywacyjny pojawia się w logach (ConsoleMailer). Po poprawnym uzupełnieniu danych zostanie użyty prawdziwy serwer SMTP.
 
 ### 💾 Przechowywanie danych backendu
 
 - Domyślny plik bazy: `backend/data/pixels.db` (tworzony automatycznie przy starcie backendu).
 - Zmienna środowiskowa `PIXEL_DB_PATH` pozwala wskazać inną lokalizację pliku.
+- W `docker-compose.yml` katalog `data/` jest montowany jako named volume (`pixel-data`), dzięki czemu baza nie resetuje się po przebudowaniu obrazu Dockera.
 - Kopię zapasową najlepiej wykonywać po zatrzymaniu serwera (lub po `COMMIT`). Można też użyć polecenia `sqlite3 pixels.db ".backup backup.db"` na bieżącej instancji.
 

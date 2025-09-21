@@ -16,11 +16,12 @@ import (
 type Config struct {
 	SMTP                     *email.SMTPConfig `json:"smtp"`
 	DisableVerificationEmail bool              `json:"disableVerificationEmail"`
+	PixelCostPoints          int               `json:"pixelCostPoints"`
 }
 
 // Default returns the configuration used when no config file exists on disk yet.
 func Default() *Config {
-	return &Config{DisableVerificationEmail: false}
+	return &Config{DisableVerificationEmail: false, PixelCostPoints: 10}
 }
 
 // WriteFile writes the given configuration as prettified JSON to the provided path.
@@ -72,6 +73,10 @@ func Load(path string) (*Config, error) {
 		if err := cfg.SMTP.Validate(); err != nil {
 			return nil, fmt.Errorf("smtp: %w", err)
 		}
+	}
+
+	if cfg.PixelCostPoints <= 0 {
+		cfg.PixelCostPoints = Default().PixelCostPoints
 	}
 
 	return &cfg, nil

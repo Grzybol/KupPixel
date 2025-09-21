@@ -1,4 +1,6 @@
 {
+  // Number of points required to claim a pixel.
+  "pixelCostPoints": 10,
   // Set to true to automatically mark newly created accounts as verified and skip emails.
   "disableVerificationEmail": false,
   // Configure SMTP to deliver verification emails. Leave the object empty or remove it to use the console mailer.

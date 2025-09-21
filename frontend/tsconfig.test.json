@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist-tests",
+    "rootDir": ".",
+    "module": "nodenext",
+    "target": "es2019",
+    "moduleResolution": "nodenext",
+    "esModuleInterop": true,
+    "noEmit": false,
+    "declaration": false,
+    "skipLibCheck": true
+  },
+  "include": ["tests/**/*.ts", "src/utils/**/*.ts"],
+  "exclude": ["dist", "dist-tests", "node_modules"]
+}

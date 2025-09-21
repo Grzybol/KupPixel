@@ -5,6 +5,7 @@
   "smtp": {
     "host": "smtp.example.com",
     "port": 587,
+    // Use port 465 to connect with implicit TLS (the connection starts encrypted without STARTTLS).
     "username": "smtp-user",
     "password": "smtp-password",
     "fromEmail": "noreply@example.com",

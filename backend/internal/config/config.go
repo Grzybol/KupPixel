@@ -17,11 +17,56 @@ type Config struct {
 	SMTP                     *email.SMTPConfig `json:"smtp"`
 	DisableVerificationEmail bool              `json:"disableVerificationEmail"`
 	PixelCostPoints          int               `json:"pixelCostPoints"`
+	Database                 *DatabaseConfig   `json:"database"`
+}
+
+// DatabaseConfig encapsulates storage backend configuration.
+type DatabaseConfig struct {
+	Driver     string       `json:"driver"`
+	SQLitePath string       `json:"sqlitePath"`
+	MySQL      *MySQLConfig `json:"mysql"`
+}
+
+// MySQLConfig describes connection settings for MariaDB/MySQL engines.
+type MySQLConfig struct {
+	DSN         string `json:"dsn"`
+	ExternalDSN string `json:"externalDsn"`
+	UseExternal bool   `json:"useExternal"`
+}
+
+func defaultDatabaseConfig() *DatabaseConfig {
+	return &DatabaseConfig{Driver: "sqlite"}
+}
+
+func (c *DatabaseConfig) normalize() {
+	if c == nil {
+		return
+	}
+	c.Driver = strings.ToLower(strings.TrimSpace(c.Driver))
+	if c.Driver == "" {
+		c.Driver = "sqlite"
+	}
+	c.SQLitePath = strings.TrimSpace(c.SQLitePath)
+	if c.MySQL != nil {
+		c.MySQL.sanitize()
+	}
+}
+
+func (c *MySQLConfig) sanitize() {
+	if c == nil {
+		return
+	}
+	c.DSN = strings.TrimSpace(c.DSN)
+	c.ExternalDSN = strings.TrimSpace(c.ExternalDSN)
 }
 
 // Default returns the configuration used when no config file exists on disk yet.
 func Default() *Config {
-	return &Config{DisableVerificationEmail: false, PixelCostPoints: 10}
+	return &Config{
+		DisableVerificationEmail: false,
+		PixelCostPoints:          10,
+		Database:                 defaultDatabaseConfig(),
+	}
 }
 
 // WriteFile writes the given configuration as prettified JSON to the provided path.
@@ -77,6 +122,25 @@ func Load(path string) (*Config, error) {
 
 	if cfg.PixelCostPoints <= 0 {
 		cfg.PixelCostPoints = Default().PixelCostPoints
+	}
+
+	if cfg.Database == nil {
+		cfg.Database = defaultDatabaseConfig()
+	} else {
+		cfg.Database.normalize()
+	}
+
+	switch cfg.Database.Driver {
+	case "sqlite":
+	case "mysql":
+		if cfg.Database.MySQL == nil {
+			return nil, errors.New("database: mysql configuration required")
+		}
+		if cfg.Database.MySQL.DSN == "" && cfg.Database.MySQL.ExternalDSN == "" {
+			return nil, errors.New("database: mysql dsn must be provided")
+		}
+	default:
+		return nil, fmt.Errorf("database: unsupported driver %q", cfg.Database.Driver)
 	}
 
 	return &cfg, nil

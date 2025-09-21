@@ -128,9 +128,9 @@ func (s *Store) EnsureSchema(ctx context.Context) (err error) {
 		return err
 	}
 
-	if count == 0 && !s.skipPixelSeed {
+	if count < storage.TotalPixels && !s.skipPixelSeed {
 		now := time.Now().UTC()
-		stmt, prepErr := tx.PrepareContext(ctx, `INSERT INTO pixels (id, status, color, url, owner_id, updated_at) VALUES (?, 'free', '', '', NULL, ?)`)
+		stmt, prepErr := tx.PrepareContext(ctx, `INSERT INTO pixels (id, status, color, url, owner_id, updated_at) VALUES (?, 'free', '', '', NULL, ?) ON DUPLICATE KEY UPDATE id = id`)
 		if prepErr != nil {
 			err = fmt.Errorf("prepare pixel seed: %w", prepErr)
 			return err

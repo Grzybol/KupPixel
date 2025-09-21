@@ -8,5 +8,6 @@ backend/frontend_dist/*
 frontend/dist
 frontend/dist-tests
 backend/data/
+backed/internal/config.json
 .env
 .DS_Store

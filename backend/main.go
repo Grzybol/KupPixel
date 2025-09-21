@@ -108,7 +108,7 @@ type userResponse struct {
 }
 
 const (
-	defaultDBPath              = "data/pixels.db"
+	defaultDBPath              = "data/pixels_new.db"
 	sessionCookieName          = "kup_pixel_session"
 	sessionCookieMaxAge        = 7 * 24 * 60 * 60
 	defaultVerificationBaseURL = "http://localhost:3000"

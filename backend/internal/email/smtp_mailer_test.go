@@ -2,7 +2,9 @@ package email
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
+	"net"
 	"net/smtp"
 	"strings"
 	"testing"
@@ -154,4 +156,36 @@ func TestSMTPMailerSendVerificationEmail(t *testing.T) {
 			t.Fatalf("expected context cancellation error, got %v", err)
 		}
 	})
+}
+
+func TestSendMailWithContextImplicitTLS(t *testing.T) {
+	cfg := SMTPConfig{
+		Host:      "smtp.example.com",
+		Port:      465,
+		FromEmail: "noreply@example.com",
+	}
+
+	ctx := context.Background()
+
+	called := false
+	originalTLSDial := tlsDialWithDialer
+	tlsDialWithDialer = func(dialer *net.Dialer, network, address string, config *tls.Config) (net.Conn, error) {
+		called = true
+		if config == nil {
+			t.Fatalf("expected tls config")
+		}
+		if config.ServerName != cfg.Host {
+			t.Fatalf("expected server name %q, got %q", cfg.Host, config.ServerName)
+		}
+		return nil, errors.New("test dial failure")
+	}
+	t.Cleanup(func() { tlsDialWithDialer = originalTLSDial })
+
+	err := sendMailWithContext(ctx, cfg, nil, cfg.FromEmail, []string{"user@example.com"}, []byte("message"))
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if !called {
+		t.Fatalf("expected implicit TLS dialer to be invoked")
+	}
 }

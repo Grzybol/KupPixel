@@ -191,17 +191,37 @@ func (m *SMTPMailer) SendVerificationEmail(ctx context.Context, recipient, verif
 	return nil
 }
 
+var (
+	newNetDialer      = func() *net.Dialer { return &net.Dialer{} }
+	tlsDialWithDialer = func(dialer *net.Dialer, network, address string, config *tls.Config) (net.Conn, error) {
+		return tls.DialWithDialer(dialer, network, address, config)
+	}
+)
+
+func isImplicitTLSPort(port int) bool {
+	return port == 465
+}
+
 func sendMailWithContext(ctx context.Context, cfg SMTPConfig, auth smtp.Auth, from string, to []string, msg []byte) (err error) {
-	dialer := &net.Dialer{}
-	log.Printf("[smtp] dialing %s", cfg.Address())
-	conn, err := dialer.DialContext(ctx, "tcp", cfg.Address())
+	dialer := newNetDialer()
+
+	address := cfg.Address()
+	var conn net.Conn
+	if isImplicitTLSPort(cfg.Port) {
+		log.Printf("[smtp] dialing %s using implicit TLS", address)
+		tlsConfig := &tls.Config{ServerName: cfg.Host}
+		conn, err = tlsDialWithDialer(dialer, "tcp", address, tlsConfig)
+	} else {
+		log.Printf("[smtp] dialing %s", address)
+		conn, err = dialer.DialContext(ctx, "tcp", address)
+	}
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
 		return err
 	}
-	log.Printf("[smtp] connected to %s", cfg.Address())
+	log.Printf("[smtp] connected to %s", address)
 
 	client, err := smtp.NewClient(conn, cfg.Host)
 	if err != nil {
@@ -233,7 +253,9 @@ func sendMailWithContext(ctx context.Context, cfg SMTPConfig, auth smtp.Auth, fr
 		}
 	}()
 
-	if ok, _ := client.Extension("STARTTLS"); ok {
+	if isImplicitTLSPort(cfg.Port) {
+		log.Printf("[smtp] implicit TLS already negotiated; skipping STARTTLS")
+	} else if ok, _ := client.Extension("STARTTLS"); ok {
 		log.Printf("[smtp] attempting STARTTLS for host=%s", cfg.Host)
 		tlsConfig := &tls.Config{ServerName: cfg.Host}
 		if err = client.StartTLS(tlsConfig); err != nil {

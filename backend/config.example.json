@@ -3,6 +3,19 @@
   "pixelCostPoints": 10,
   // Set to true to automatically mark newly created accounts as verified and skip emails.
   "disableVerificationEmail": false,
+  "database": {
+    "driver": "sqlite",
+    // Optional override for sqlite database path; defaults to PIXEL_DB_PATH or data/pixels_new.db.
+    "sqlitePath": "",
+    "mysql": {
+      // Default DSN used when connecting to a database inside docker-compose.
+      "dsn": "kup_pixel:kup_pixel@tcp(db:3306)/kup_pixel?parseTime=true",
+      // Alternate DSN pointing to a database running on the Docker host.
+      "externalDsn": "kup_pixel:kup_pixel@tcp(host.docker.internal:3306)/kup_pixel?parseTime=true",
+      // Set to true to prefer externalDsn when running inside Docker.
+      "useExternal": false
+    }
+  },
   // Configure SMTP to deliver verification emails. Leave the object empty or remove it to use the console mailer.
   "smtp": {
     "host": "smtp.example.com",

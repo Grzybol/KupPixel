@@ -37,6 +37,12 @@ func TestLoad_DisableVerificationWithoutSMTP(t *testing.T) {
 	if cfg.SMTP != nil {
 		t.Fatalf("expected SMTP to be nil, got %#v", cfg.SMTP)
 	}
+	if cfg.Database == nil {
+		t.Fatal("expected database configuration")
+	}
+	if cfg.Database.Driver != "sqlite" {
+		t.Fatalf("expected sqlite driver, got %q", cfg.Database.Driver)
+	}
 }
 
 func TestLoad_WithValidSMTP(t *testing.T) {
@@ -69,6 +75,12 @@ func TestLoad_WithValidSMTP(t *testing.T) {
 	if *cfg.SMTP != *expected {
 		t.Fatalf("unexpected SMTP configuration: %#v", cfg.SMTP)
 	}
+	if cfg.Database == nil {
+		t.Fatal("expected database configuration")
+	}
+	if cfg.Database.Driver != "sqlite" {
+		t.Fatalf("expected sqlite driver by default, got %q", cfg.Database.Driver)
+	}
 }
 
 func TestLoad_InvalidSMTP(t *testing.T) {
@@ -88,6 +100,22 @@ func TestLoad_InvalidSMTP(t *testing.T) {
 func TestLoad_MissingPath(t *testing.T) {
 	if _, err := Load(" "); err == nil {
 		t.Fatal("expected error for empty path")
+	}
+}
+
+func TestLoad_InvalidDatabaseDriver(t *testing.T) {
+	path := writeTempConfig(t, `{ "database": { "driver": "oracle" } }`)
+
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for unsupported driver")
+	}
+}
+
+func TestLoad_MySQLRequiresDSN(t *testing.T) {
+	path := writeTempConfig(t, `{ "database": { "driver": "mysql" } }`)
+
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error when mysql dsn missing")
 	}
 }
 
@@ -118,5 +146,11 @@ func TestWriteFile_DefaultConfig(t *testing.T) {
 
 	if cfg.SMTP != nil {
 		t.Fatalf("expected SMTP to be nil, got %#v", cfg.SMTP)
+	}
+	if cfg.Database == nil {
+		t.Fatal("expected database configuration")
+	}
+	if cfg.Database.Driver != "sqlite" {
+		t.Fatalf("expected sqlite driver, got %q", cfg.Database.Driver)
 	}
 }

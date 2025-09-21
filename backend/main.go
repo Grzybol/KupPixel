@@ -24,6 +24,8 @@ import (
 
 	"github.com/example/kup-piksel/internal/config"
 	"github.com/example/kup-piksel/internal/email"
+	"github.com/example/kup-piksel/internal/storage"
+	"github.com/example/kup-piksel/internal/storage/mysql"
 	"github.com/example/kup-piksel/internal/storage/sqlite"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -39,7 +41,7 @@ type UpdatePixelRequest struct {
 }
 
 type Server struct {
-	store                    *sqlite.Store
+	store                    storage.Store
 	sessions                 *SessionManager
 	mailer                   email.Mailer
 	verificationBaseURL      string
@@ -163,13 +165,81 @@ func readSessionCookie(r *http.Request) (string, bool, error) {
 	return cookie.Value, true, nil
 }
 
-func sanitizeUser(user sqlite.User) userResponse {
+func sanitizeUser(user storage.User) userResponse {
 	return userResponse{
 		ID:         user.ID,
 		Email:      user.Email,
 		IsVerified: user.IsVerified,
 		VerifiedAt: user.VerifiedAt,
 		Points:     user.Points,
+	}
+}
+
+func resolveSQLitePath(cfg *config.Config) string {
+	if cfg != nil && cfg.Database != nil {
+		if path := strings.TrimSpace(cfg.Database.SQLitePath); path != "" {
+			return path
+		}
+	}
+	return ""
+}
+
+func selectMySQLDSN(cfg *config.DatabaseConfig) string {
+	if cfg == nil || cfg.MySQL == nil {
+		return ""
+	}
+	if env := os.Getenv("PIXEL_MYSQL_DSN"); env != "" {
+		return strings.TrimSpace(env)
+	}
+	if cfg.MySQL.UseExternal && cfg.MySQL.ExternalDSN != "" {
+		return cfg.MySQL.ExternalDSN
+	}
+	return cfg.MySQL.DSN
+}
+
+func openConfiguredStore(cfg *config.Config) (storage.Store, string, error) {
+	if cfg == nil || cfg.Database == nil {
+		cfg = config.Default()
+	}
+
+	switch cfg.Database.Driver {
+	case "sqlite":
+		dbPath := os.Getenv("PIXEL_DB_PATH")
+		if strings.TrimSpace(dbPath) == "" {
+			dbPath = resolveSQLitePath(cfg)
+		}
+		if strings.TrimSpace(dbPath) == "" {
+			dbPath = defaultDBPath
+		}
+
+		if dir := filepath.Dir(dbPath); dir != "" && dir != "." {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return nil, "", fmt.Errorf("create database directory: %w", err)
+			}
+		}
+
+		store, err := sqlite.Open(dbPath)
+		if err != nil {
+			return nil, "", fmt.Errorf("open sqlite store: %w", err)
+		}
+		return store, fmt.Sprintf("sqlite(path=%s)", dbPath), nil
+	case "mysql":
+		dsn := selectMySQLDSN(cfg.Database)
+		if strings.TrimSpace(dsn) == "" {
+			return nil, "", errors.New("mysql dsn must not be empty")
+		}
+
+		store, err := mysql.Open(dsn)
+		if err != nil {
+			return nil, "", fmt.Errorf("open mysql store: %w", err)
+		}
+		mode := "internal"
+		if cfg.Database.MySQL != nil && cfg.Database.MySQL.UseExternal {
+			mode = "external"
+		}
+		return store, fmt.Sprintf("mysql(mode=%s)", mode), nil
+	default:
+		return nil, "", fmt.Errorf("unsupported database driver %q", cfg.Database.Driver)
 	}
 }
 
@@ -193,34 +263,34 @@ func buildVerificationLink(base string, token string) (string, error) {
 	return fmt.Sprintf("%s/verify?token=%s", trimmed, escapedToken), nil
 }
 
-func (s *Server) getSessionUser(c *gin.Context) (sqlite.User, string, bool) {
+func (s *Server) getSessionUser(c *gin.Context) (storage.User, string, bool) {
 	sessionID, ok, err := readSessionCookie(c.Request)
 	if err != nil {
 		log.Printf("read session cookie: %v", err)
-		return sqlite.User{}, "", false
+		return storage.User{}, "", false
 	}
 	if !ok {
-		return sqlite.User{}, "", false
+		return storage.User{}, "", false
 	}
 
 	userID, exists := s.sessions.Get(sessionID)
 	if !exists {
-		return sqlite.User{}, sessionID, false
+		return storage.User{}, sessionID, false
 	}
 
 	user, err := s.store.GetUserByID(c.Request.Context(), userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return sqlite.User{}, sessionID, false
+			return storage.User{}, sessionID, false
 		}
 		log.Printf("load user %d: %v", userID, err)
-		return sqlite.User{}, sessionID, false
+		return storage.User{}, sessionID, false
 	}
 
 	return user, sessionID, true
 }
 
-func (s *Server) requireUser(c *gin.Context) (sqlite.User, bool) {
+func (s *Server) requireUser(c *gin.Context) (storage.User, bool) {
 	user, sessionID, ok := s.getSessionUser(c)
 	if !ok {
 		if sessionID != "" {
@@ -228,7 +298,7 @@ func (s *Server) requireUser(c *gin.Context) (sqlite.User, bool) {
 			clearSessionCookie(c)
 		}
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
-		return sqlite.User{}, false
+		return storage.User{}, false
 	}
 	return user, true
 }
@@ -266,26 +336,16 @@ func main() {
 	}
 	log.Printf("pixel cost configured at %d points", pixelCost)
 
-	dbPath := os.Getenv("PIXEL_DB_PATH")
-	if dbPath == "" {
-		dbPath = defaultDBPath
-	}
-
-	if dir := filepath.Dir(dbPath); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			log.Fatalf("create database directory: %v", err)
-		}
-	}
-
-	store, err := sqlite.Open(dbPath)
+	store, storeDescription, err := openConfiguredStore(cfg)
 	if err != nil {
-		log.Fatalf("open sqlite store: %v", err)
+		log.Fatalf("configure storage: %v", err)
 	}
 	defer func() {
 		if cerr := store.Close(); cerr != nil {
 			log.Printf("close store: %v", cerr)
 		}
 	}()
+	log.Printf("storage backend: %s", storeDescription)
 
 	ctx := context.Background()
 	if err := store.EnsureSchema(ctx); err != nil {
@@ -334,9 +394,9 @@ func main() {
 	}
 
 	log.Printf(
-		"startup config: config_path=%s db_path=%s verification_base_url=%s smtp_configured=%t disable_verification_email=%t pixel_cost_points=%d",
+		"startup config: config_path=%s storage_backend=%s verification_base_url=%s smtp_configured=%t disable_verification_email=%t pixel_cost_points=%d",
 		configPath,
-		dbPath,
+		storeDescription,
 		verificationBaseURL,
 		smtpConfigured,
 		cfg.DisableVerificationEmail,
@@ -580,7 +640,7 @@ func (s *Server) handleLogin(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": sanitizeUser(user), "pixel_cost_points": s.pixelCostPoints})
 }
 
-func (s *Server) issueVerificationToken(ctx context.Context, user sqlite.User) (string, error) {
+func (s *Server) issueVerificationToken(ctx context.Context, user storage.User) (string, error) {
 	if s.disableVerificationEmail {
 		return "", errors.New("email verification disabled")
 	}
@@ -823,7 +883,7 @@ func (s *Server) handleUpdatePixel(c *gin.Context) {
 		return
 	}
 
-	if req.ID < 0 || req.ID >= sqlite.TotalPixels {
+	if req.ID < 0 || req.ID >= storage.TotalPixels {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pixel id"})
 		return
 	}
@@ -840,7 +900,7 @@ func (s *Server) handleUpdatePixel(c *gin.Context) {
 		req.URL = ""
 	}
 
-	updated, updatedUser, err := s.store.UpdatePixelForUserWithCost(c.Request.Context(), user.ID, sqlite.Pixel{
+	updated, updatedUser, err := s.store.UpdatePixelForUserWithCost(c.Request.Context(), user.ID, storage.Pixel{
 		ID:     req.ID,
 		Status: req.Status,
 		Color:  req.Color,
@@ -851,11 +911,11 @@ func (s *Server) handleUpdatePixel(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "pixel not found"})
 			return
 		}
-		if errors.Is(err, sqlite.ErrPixelOwnedByAnotherUser) {
+		if errors.Is(err, storage.ErrPixelOwnedByAnotherUser) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "pixel already owned"})
 			return
 		}
-		if errors.Is(err, sqlite.ErrInsufficientPoints) {
+		if errors.Is(err, storage.ErrInsufficientPoints) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "brak wystarczającej liczby punktów. Aktywuj kod, aby zdobyć więcej."})
 			return
 		}
@@ -871,8 +931,8 @@ func (s *Server) handleUpdatePixel(c *gin.Context) {
 	})
 }
 
-func seedDemoPixels(ctx context.Context, store *sqlite.Store) {
-	demo := []sqlite.Pixel{
+func seedDemoPixels(ctx context.Context, store storage.Store) {
+	demo := []storage.Pixel{
 		{ID: 500500, Status: "taken", Color: "#ff4d4f", URL: "https://example.com"},
 		{ID: 250250, Status: "taken", Color: "#36cfc9", URL: "https://minecraft.net"},
 		{ID: 750750, Status: "taken", Color: "#722ed1", URL: "https://github.com"},

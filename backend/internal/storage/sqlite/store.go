@@ -57,6 +57,51 @@ type PixelState struct {
 	Pixels []Pixel `json:"pixels"`
 }
 
+func (s *Store) GetPixelsByOwner(ctx context.Context, ownerID int64) ([]Pixel, error) {
+	if ownerID <= 0 {
+		return nil, errors.New("invalid owner id")
+	}
+
+	query := fmt.Sprintf(
+		"SELECT id, status, COALESCE(color, ''), COALESCE(url, ''), owner_id, updated_at FROM pixels WHERE owner_id = %d ORDER BY updated_at DESC",
+		ownerID,
+	)
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("query pixels by owner: %w", err)
+	}
+	defer rows.Close()
+
+	pixels := make([]Pixel, 0)
+	for rows.Next() {
+		var pixel Pixel
+		var owner sql.NullInt64
+		var updated sql.NullString
+		if err := rows.Scan(&pixel.ID, &pixel.Status, &pixel.Color, &pixel.URL, &owner, &updated); err != nil {
+			return nil, fmt.Errorf("scan pixel: %w", err)
+		}
+		if owner.Valid {
+			ownerID := owner.Int64
+			pixel.OwnerID = &ownerID
+		}
+		if updated.Valid {
+			parsed, err := parseUpdatedAt(updated.String)
+			if err != nil {
+				return nil, fmt.Errorf("parse pixel %d updated_at: %w", pixel.ID, err)
+			}
+			pixel.UpdatedAt = parsed
+		}
+		pixels = append(pixels, pixel)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate pixels by owner: %w", err)
+	}
+
+	return pixels, nil
+}
+
 func Open(path string) (*Store, error) {
 	if path == "" {
 		return nil, errors.New("sqlite path must not be empty")

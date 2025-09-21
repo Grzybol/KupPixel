@@ -4,6 +4,7 @@ import PixelCanvas, { Pixel } from "./components/PixelCanvas";
 import LoginModal from "./components/LoginModal";
 import RegisterModal from "./components/RegisterModal";
 import VerifyAccountPage from "./components/VerifyAccountPage";
+import AccountPage from "./components/AccountPage";
 import { useAuth } from "./useAuth";
 
 type PixelResponse = {
@@ -119,6 +120,12 @@ function LandingPage({ onOpenRegister }: LandingPageProps) {
               <span className="rounded-full bg-slate-800/80 px-4 py-2 text-slate-200">
                 Zalogowano jako <span className="font-semibold">{user.email}</span>
               </span>
+              <Link
+                to="/account"
+                className="rounded-full bg-slate-800/70 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-700"
+              >
+                Twoje konto
+              </Link>
               <button
                 type="button"
                 onClick={() => void logout()}
@@ -386,6 +393,7 @@ export default function App() {
     <>
       <Routes>
         <Route path="/" element={<LandingPage onOpenRegister={handleOpenRegister} />} />
+        <Route path="/account" element={<AccountPage />} />
         <Route path="/verify" element={<VerifyAccountPage />} />
         <Route path="/buy/:pixelId" element={<BuyPixelPage />} />
         <Route

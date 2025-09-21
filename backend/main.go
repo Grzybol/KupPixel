@@ -328,6 +328,7 @@ func main() {
 	router.POST("/api/login", server.handleLogin)
 	router.POST("/api/logout", server.handleLogout)
 	router.GET("/api/session", server.handleSession)
+	router.GET("/api/account", server.handleAccount)
 	router.GET("/api/verify", server.handleVerifyAccount)
 	router.POST("/api/resend-verification", server.handleResendVerification)
 
@@ -730,6 +731,25 @@ func (s *Server) handleSession(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"user": sanitizeUser(user)})
+}
+
+func (s *Server) handleAccount(c *gin.Context) {
+	user, ok := s.requireUser(c)
+	if !ok {
+		return
+	}
+
+	pixels, err := s.store.GetPixelsByOwner(c.Request.Context(), user.ID)
+	if err != nil {
+		log.Printf("get pixels for user %d: %v", user.ID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load account"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"user":   sanitizeUser(user),
+		"pixels": pixels,
+	})
 }
 
 func (s *Server) handleUpdatePixel(c *gin.Context) {

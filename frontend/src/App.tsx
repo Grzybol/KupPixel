@@ -5,6 +5,7 @@ import LoginModal from "./components/LoginModal";
 import RegisterModal from "./components/RegisterModal";
 import VerifyAccountPage from "./components/VerifyAccountPage";
 import AccountPage from "./components/AccountPage";
+import ActivationCodeModal from "./components/ActivationCodeModal";
 import { useAuth } from "./useAuth";
 
 type PixelResponse = {
@@ -70,12 +71,13 @@ function usePixels() {
 
 type LandingPageProps = {
   onOpenRegister: () => void;
+  onOpenActivationCode: () => void;
 };
 
-function LandingPage({ onOpenRegister }: LandingPageProps) {
+function LandingPage({ onOpenRegister, onOpenActivationCode }: LandingPageProps) {
   const navigate = useNavigate();
   const { data, loading, error } = usePixels();
-  const { user, ensureAuthenticated, openLoginModal, logout } = useAuth();
+  const { user, ensureAuthenticated, openLoginModal, logout, pixelCostPoints } = useAuth();
 
   const handlePixelClick = useCallback(
     async (pixel: Pixel) => {
@@ -114,12 +116,31 @@ function LandingPage({ onOpenRegister }: LandingPageProps) {
           <span className="font-semibold text-slate-200">Zajęte: {heroStats.taken}</span>
           <span className="font-semibold text-slate-200">Wolne: {heroStats.free}</span>
         </div>
+        {user && (
+          <div className="mt-3 text-sm text-slate-300">
+            <span className="mr-4 inline-flex items-center rounded-full bg-slate-800/70 px-4 py-1 text-slate-200">
+              Saldo: <span className="ml-1 font-semibold">{typeof user.points === "number" ? user.points : 0} pkt</span>
+            </span>
+            {typeof pixelCostPoints === "number" && pixelCostPoints > 0 && (
+              <span className="inline-flex items-center rounded-full bg-slate-800/70 px-4 py-1 text-slate-200">
+                Koszt piksela: <span className="ml-1 font-semibold">{pixelCostPoints} pkt</span>
+              </span>
+            )}
+          </div>
+        )}
         <div className="mt-6 flex items-center justify-center gap-4 text-sm text-slate-300">
           {user ? (
             <>
               <span className="rounded-full bg-slate-800/80 px-4 py-2 text-slate-200">
                 Zalogowano jako <span className="font-semibold">{user.email}</span>
               </span>
+              <button
+                type="button"
+                onClick={onOpenActivationCode}
+                className="rounded-full bg-emerald-500/90 px-4 py-2 font-semibold text-emerald-950 shadow-lg transition hover:bg-emerald-400"
+              >
+                Aktywuj kod
+              </button>
               <Link
                 to="/account"
                 className="rounded-full bg-slate-800/70 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-700"
@@ -177,7 +198,7 @@ function LandingPage({ onOpenRegister }: LandingPageProps) {
 
 function BuyPixelPage() {
   const { pixelId } = useParams<{ pixelId: string }>();
-  const { ensureAuthenticated, openLoginModal } = useAuth();
+  const { ensureAuthenticated, openLoginModal, user, pixelCostPoints, refresh } = useAuth();
   const id = useMemo(() => {
     if (!pixelId) return null;
     const parsed = Number(pixelId);
@@ -233,11 +254,21 @@ function BuyPixelPage() {
           void openLoginModal({ message: "Zaloguj się ponownie, aby sfinalizować zakup." });
           throw new Error("Twoja sesja wygasła. Zaloguj się ponownie.");
         }
-        const message = await response.text().catch(() => null);
-        throw new Error(message || `Błąd API: ${response.status}`);
+        const payload = await response.json().catch(() => null);
+        const apiMessage =
+          payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).error === "string"
+            ? ((payload as Record<string, unknown>).error as string)
+            : null;
+        if (response.status === 400 || response.status === 403) {
+          throw new Error(
+            apiMessage || "Brak wystarczającej liczby punktów, aby kupić piksel. Aktywuj kod i spróbuj ponownie."
+          );
+        }
+        throw new Error(apiMessage || `Błąd API: ${response.status}`);
       }
 
       setPurchaseStatus("success");
+      await refresh().catch(() => undefined);
     } catch (error) {
       console.error(error);
       const message = error instanceof Error ? error.message : "Nie udało się zarezerwować piksela. Spróbuj ponownie.";
@@ -245,7 +276,7 @@ function BuyPixelPage() {
     } finally {
       setIsProcessing(false);
     }
-  }, [ensureAuthenticated, id, openLoginModal, selectedColor, url]);
+  }, [ensureAuthenticated, id, openLoginModal, refresh, selectedColor, url]);
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center px-6 py-12 text-center">
@@ -256,6 +287,21 @@ function BuyPixelPage() {
           <span className="font-mono text-white">{id ?? "nieznany"}</span>. Tutaj możesz dobrać kolor i
           przejść przez fikcyjny proces płatności, aby zobaczyć, jak będzie działał prawdziwy checkout.
         </p>
+
+        <div className="mt-6 grid gap-3 text-left text-sm text-slate-300 sm:grid-cols-2">
+          <div className="rounded-xl border border-slate-800/70 bg-slate-900/70 p-4">
+            <p className="font-semibold text-slate-100">Koszt zakupu</p>
+            <p className="mt-1 text-slate-300">
+              {typeof pixelCostPoints === "number" && pixelCostPoints > 0
+                ? `${pixelCostPoints} punktów`
+                : "Sprawdź konfigurację"}
+            </p>
+          </div>
+          <div className="rounded-xl border border-slate-800/70 bg-slate-900/70 p-4">
+            <p className="font-semibold text-slate-100">Twoje saldo</p>
+            <p className="mt-1 text-slate-300">{typeof user?.points === "number" ? `${user.points} punktów` : "Zaloguj się"}</p>
+          </div>
+        </div>
 
         <div className="mt-8 rounded-2xl bg-slate-800/70 p-6 text-left">
           <h3 className="text-lg font-semibold text-slate-100">Dopasuj swój piksel</h3>
@@ -374,8 +420,9 @@ function BuyPixelPage() {
 }
 
 export default function App() {
-  const { openLoginModal } = useAuth();
+  const { openLoginModal, refresh } = useAuth();
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
+  const [isActivationModalOpen, setIsActivationModalOpen] = useState(false);
 
   const handleOpenRegister = useCallback(() => {
     setIsRegisterOpen(true);
@@ -389,11 +436,30 @@ export default function App() {
     void openLoginModal({ message: "Zaloguj się, aby rozpocząć." });
   }, [openLoginModal]);
 
+  const handleOpenActivationCode = useCallback(() => {
+    setIsActivationModalOpen(true);
+  }, []);
+
+  const handleCloseActivationCode = useCallback(() => {
+    setIsActivationModalOpen(false);
+  }, []);
+
+  const handleActivationSuccess = useCallback(
+    async () => {
+      await refresh().catch(() => undefined);
+      setIsActivationModalOpen(false);
+    },
+    [refresh]
+  );
+
   return (
     <>
       <Routes>
-        <Route path="/" element={<LandingPage onOpenRegister={handleOpenRegister} />} />
-        <Route path="/account" element={<AccountPage />} />
+        <Route
+          path="/"
+          element={<LandingPage onOpenRegister={handleOpenRegister} onOpenActivationCode={handleOpenActivationCode} />}
+        />
+        <Route path="/account" element={<AccountPage onOpenActivationCode={handleOpenActivationCode} />} />
         <Route path="/verify" element={<VerifyAccountPage />} />
         <Route path="/buy/:pixelId" element={<BuyPixelPage />} />
         <Route
@@ -415,6 +481,11 @@ export default function App() {
         onOpenLogin={() => {
           handleOpenLoginFromRegister();
         }}
+      />
+      <ActivationCodeModal
+        isOpen={isActivationModalOpen}
+        onClose={handleCloseActivationCode}
+        onSuccess={handleActivationSuccess}
       />
     </>
   );

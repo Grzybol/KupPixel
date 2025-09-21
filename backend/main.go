@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +45,7 @@ type Server struct {
 	verificationBaseURL      string
 	verificationTokenTTL     time.Duration
 	disableVerificationEmail bool
+	pixelCostPoints          int64
 }
 
 type SessionManager struct {
@@ -102,16 +104,19 @@ type userResponse struct {
 	Email      string     `json:"email"`
 	IsVerified bool       `json:"is_verified"`
 	VerifiedAt *time.Time `json:"verified_at,omitempty"`
+	Points     int64      `json:"points"`
 }
 
 const (
-	defaultDBPath              = "data/pixels.db"
+	defaultDBPath              = "data/pixels_new.db"
 	sessionCookieName          = "kup_pixel_session"
 	sessionCookieMaxAge        = 7 * 24 * 60 * 60
 	defaultVerificationBaseURL = "http://localhost:3000"
 	defaultVerificationTTL     = 24 * time.Hour
 	defaultConfigPath          = "config.json"
 )
+
+var activationCodePattern = regexp.MustCompile(`^[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}$`)
 
 func generateSessionID() (string, error) {
 	buf := make([]byte, 32)
@@ -159,7 +164,13 @@ func readSessionCookie(r *http.Request) (string, bool, error) {
 }
 
 func sanitizeUser(user sqlite.User) userResponse {
-	return userResponse{ID: user.ID, Email: user.Email, IsVerified: user.IsVerified, VerifiedAt: user.VerifiedAt}
+	return userResponse{
+		ID:         user.ID,
+		Email:      user.Email,
+		IsVerified: user.IsVerified,
+		VerifiedAt: user.VerifiedAt,
+		Points:     user.Points,
+	}
 }
 
 func generateVerificationToken() (string, error) {
@@ -249,6 +260,12 @@ func main() {
 	}
 	log.Printf("loaded config from %s", configPath)
 
+	pixelCost := cfg.PixelCostPoints
+	if pixelCost <= 0 {
+		pixelCost = config.Default().PixelCostPoints
+	}
+	log.Printf("pixel cost configured at %d points", pixelCost)
+
 	dbPath := os.Getenv("PIXEL_DB_PATH")
 	if dbPath == "" {
 		dbPath = defaultDBPath
@@ -313,15 +330,17 @@ func main() {
 		verificationBaseURL:      verificationBaseURL,
 		verificationTokenTTL:     defaultVerificationTTL,
 		disableVerificationEmail: cfg.DisableVerificationEmail,
+		pixelCostPoints:          int64(pixelCost),
 	}
 
 	log.Printf(
-		"startup config: config_path=%s db_path=%s verification_base_url=%s smtp_configured=%t disable_verification_email=%t",
+		"startup config: config_path=%s db_path=%s verification_base_url=%s smtp_configured=%t disable_verification_email=%t pixel_cost_points=%d",
 		configPath,
 		dbPath,
 		verificationBaseURL,
 		smtpConfigured,
 		cfg.DisableVerificationEmail,
+		pixelCost,
 	)
 
 	router.POST("/api/register", server.handleRegister)
@@ -329,6 +348,7 @@ func main() {
 	router.POST("/api/logout", server.handleLogout)
 	router.GET("/api/session", server.handleSession)
 	router.GET("/api/account", server.handleAccount)
+	router.POST("/api/activation-codes/redeem", server.handleRedeemActivationCode)
 	router.GET("/api/verify", server.handleVerifyAccount)
 	router.POST("/api/resend-verification", server.handleResendVerification)
 
@@ -557,7 +577,7 @@ func (s *Server) handleLogin(c *gin.Context) {
 	}
 	setSessionCookie(c, sessionID)
 
-	c.JSON(http.StatusOK, gin.H{"user": sanitizeUser(user)})
+	c.JSON(http.StatusOK, gin.H{"user": sanitizeUser(user), "pixel_cost_points": s.pixelCostPoints})
 }
 
 func (s *Server) issueVerificationToken(ctx context.Context, user sqlite.User) (string, error) {
@@ -727,10 +747,10 @@ func (s *Server) handleSession(c *gin.Context) {
 			s.sessions.Delete(sessionID)
 			clearSessionCookie(c)
 		}
-		c.JSON(http.StatusOK, gin.H{"user": nil})
+		c.JSON(http.StatusOK, gin.H{"user": nil, "pixel_cost_points": s.pixelCostPoints})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"user": sanitizeUser(user)})
+	c.JSON(http.StatusOK, gin.H{"user": sanitizeUser(user), "pixel_cost_points": s.pixelCostPoints})
 }
 
 func (s *Server) handleAccount(c *gin.Context) {
@@ -747,8 +767,47 @@ func (s *Server) handleAccount(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"user":   sanitizeUser(user),
-		"pixels": pixels,
+		"user":              sanitizeUser(user),
+		"pixels":            pixels,
+		"pixel_cost_points": s.pixelCostPoints,
+	})
+}
+
+func (s *Server) handleRedeemActivationCode(c *gin.Context) {
+	user, ok := s.requireUser(c)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+
+	code := strings.ToUpper(strings.TrimSpace(req.Code))
+	if !activationCodePattern.MatchString(code) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "nieprawidłowy format kodu. Użyj xxxx-xxxx-xxxx-xxxx."})
+		return
+	}
+
+	updatedUser, added, err := s.store.RedeemActivationCode(c.Request.Context(), user.ID, code)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "kod nie istnieje lub został już wykorzystany."})
+			return
+		}
+		log.Printf("redeem activation code %s for user %d: %v", code, user.ID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "nie udało się aktywować kodu"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"user":              sanitizeUser(updatedUser),
+		"added_points":      added,
+		"pixel_cost_points": s.pixelCostPoints,
 	})
 }
 
@@ -781,12 +840,12 @@ func (s *Server) handleUpdatePixel(c *gin.Context) {
 		req.URL = ""
 	}
 
-	updated, err := s.store.UpdatePixelForUser(c.Request.Context(), user.ID, sqlite.Pixel{
+	updated, updatedUser, err := s.store.UpdatePixelForUserWithCost(c.Request.Context(), user.ID, sqlite.Pixel{
 		ID:     req.ID,
 		Status: req.Status,
 		Color:  req.Color,
 		URL:    req.URL,
-	})
+	}, s.pixelCostPoints)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "pixel not found"})
@@ -796,12 +855,20 @@ func (s *Server) handleUpdatePixel(c *gin.Context) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "pixel already owned"})
 			return
 		}
+		if errors.Is(err, sqlite.ErrInsufficientPoints) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "brak wystarczającej liczby punktów. Aktywuj kod, aby zdobyć więcej."})
+			return
+		}
 		log.Printf("update pixel %d: %v", req.ID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update pixel"})
 		return
 	}
 
-	c.JSON(http.StatusOK, updated)
+	c.JSON(http.StatusOK, gin.H{
+		"pixel":             updated,
+		"user":              sanitizeUser(updatedUser),
+		"pixel_cost_points": s.pixelCostPoints,
+	})
 }
 
 func seedDemoPixels(ctx context.Context, store *sqlite.Store) {

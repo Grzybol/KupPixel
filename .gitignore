@@ -6,6 +6,8 @@ backend/frontend_dist/*
 !backend/frontend_dist/assets/
 !backend/frontend_dist/assets/**
 frontend/dist
+frontend/dist-tests
 backend/data/
+backed/internal/config.json
 .env
 .DS_Store

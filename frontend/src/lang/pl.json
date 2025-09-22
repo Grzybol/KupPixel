@@ -126,6 +126,23 @@
       "verifyResendDescription": "Wpisz swój adres e-mail, aby otrzymać nowy token weryfikacyjny.",
       "verifyErrorTitle": "Nie udało się potwierdzić konta",
       "verifyReady": "Gotowe!"
+    },
+    "passwordReset": {
+      "title": "Zresetuj hasło",
+      "description": "Podaj adres e-mail, aby otrzymać instrukcje resetu.",
+      "submit": "Wyślij link resetujący",
+      "success": "Jeśli konto istnieje, wysłaliśmy instrukcje resetu na Twój adres e-mail.",
+      "link": "Nie pamiętasz hasła?",
+      "confirmTitle": "Ustaw nowe hasło",
+      "confirmDescription": "Wpisz nowe hasło dla swojego konta.",
+      "confirmSubmit": "Zapisz nowe hasło",
+      "confirmSuccess": "Hasło zostało zaktualizowane. Możesz się teraz zalogować.",
+      "errors": {
+        "request": "Nie udało się wysłać prośby o reset hasła. Spróbuj ponownie.",
+        "confirm": "Nie udało się zresetować hasła. Spróbuj ponownie.",
+        "missingToken": "Brak lub nieprawidłowy token resetujący.",
+        "passwordRequired": "Podaj nowe hasło."
+      }
     }
   },
   "landing": {

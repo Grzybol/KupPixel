@@ -1,6 +1,8 @@
 // @ts-ignore - node type definitions are not available in this environment
 import assert from "node:assert/strict";
 import { getActivationCodePattern, isActivationCodeValid, normalizeActivationCode } from "../src/utils/activationCode.js";
+import en from "../src/lang/en.json" with { type: "json" };
+import pl from "../src/lang/pl.json" with { type: "json" };
 
 declare const process: { exitCode?: number };
 
@@ -48,4 +50,19 @@ test("isActivationCodeValid rejects invalid codes", () => {
 test("normalizeActivationCode output matches API pattern", () => {
   const normalized = normalizeActivationCode("a1b2-c3d4-e5f6-g7h8");
   assert.equal(getActivationCodePattern().test(normalized), true);
+});
+
+function collectKeys(record: Record<string, unknown>): string[] {
+  return Object.keys(record).sort();
+}
+
+test("password reset translations are aligned", () => {
+  const enPasswordReset = (en.auth as Record<string, unknown>).passwordReset as Record<string, unknown>;
+  const plPasswordReset = (pl.auth as Record<string, unknown>).passwordReset as Record<string, unknown>;
+  assert.ok(enPasswordReset, "english password reset section missing");
+  assert.ok(plPasswordReset, "polish password reset section missing");
+  assert.deepEqual(collectKeys(enPasswordReset), collectKeys(plPasswordReset));
+  const enErrors = enPasswordReset.errors as Record<string, unknown>;
+  const plErrors = plPasswordReset.errors as Record<string, unknown>;
+  assert.deepEqual(collectKeys(enErrors), collectKeys(plErrors));
 });

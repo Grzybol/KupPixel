@@ -56,6 +56,8 @@ type Server struct {
 	mailer                   email.Mailer
 	verificationBaseURL      string
 	verificationTokenTTL     time.Duration
+	passwordResetBaseURL     string
+	passwordResetTokenTTL    time.Duration
 	disableVerificationEmail bool
 	pixelCostPoints          int64
 }
@@ -108,6 +110,15 @@ func (m *SessionManager) Delete(id string) {
 
 type authRequest struct {
 	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type passwordResetRequest struct {
+	Email string `json:"email"`
+}
+
+type passwordResetConfirmRequest struct {
+	Token    string `json:"token"`
 	Password string `json:"password"`
 }
 
@@ -273,6 +284,18 @@ func buildVerificationLink(base string, token string) (string, error) {
 	return fmt.Sprintf("%s/verify?token=%s", trimmed, escapedToken), nil
 }
 
+func buildPasswordResetLink(base string, token string) (string, error) {
+	trimmed := strings.TrimRight(base, "/")
+	if trimmed == "" {
+		trimmed = defaultVerificationBaseURL
+	}
+	if _, err := url.Parse(trimmed); err != nil {
+		return "", fmt.Errorf("invalid base url: %w", err)
+	}
+	escapedToken := url.QueryEscape(token)
+	return fmt.Sprintf("%s/reset-password?token=%s", trimmed, escapedToken), nil
+}
+
 func (s *Server) getSessionUser(c *gin.Context) (storage.User, string, bool) {
 	sessionID, ok, err := readSessionCookie(c.Request)
 	if err != nil {
@@ -364,23 +387,37 @@ func main() {
 	seedDemoPixels(ctx, store)
 
 	router := gin.Default()
-	verificationBaseURL := os.Getenv("VERIFICATION_LINK_BASE_URL")
+	verificationBaseURL := strings.TrimSpace(os.Getenv("VERIFICATION_LINK_BASE_URL"))
 	if verificationBaseURL == "" {
 		verificationBaseURL = defaultVerificationBaseURL
 	}
 
+	passwordResetBaseURL := strings.TrimSpace(os.Getenv("PASSWORD_RESET_LINK_BASE_URL"))
+	if passwordResetBaseURL == "" {
+		passwordResetBaseURL = strings.TrimSpace(cfg.PasswordReset.BaseURL)
+	}
+	if passwordResetBaseURL == "" {
+		passwordResetBaseURL = verificationBaseURL
+	}
+
+	passwordResetTTL := time.Duration(cfg.PasswordReset.TokenTTLHours) * time.Hour
+	if passwordResetTTL <= 0 {
+		passwordResetTTL = time.Duration(config.Default().PasswordReset.TokenTTLHours) * time.Hour
+	}
+
 	smtpConfigured := false
-	var mailer email.Mailer = email.NewConsoleMailer("Kup Piksel")
+	var mailer email.Mailer = email.NewConsoleMailer("Kup Piksel", cfg.Email.Language)
 	if cfg.SMTP != nil {
 		log.Printf(
-			"smtp config detected: host=%s port=%d username=%s from_email=%s from_name=%s",
+			"smtp config detected: host=%s port=%d username=%s from_email=%s from_name=%s language=%s",
 			cfg.SMTP.Host,
 			cfg.SMTP.Port,
 			cfg.SMTP.Username,
 			cfg.SMTP.FromEmail,
 			cfg.SMTP.FromName,
+			cfg.Email.Language,
 		)
-		smtpMailer, err := email.NewSMTPMailer(*cfg.SMTP)
+		smtpMailer, err := email.NewSMTPMailer(*cfg.SMTP, cfg.Email.Language)
 		if err != nil {
 			log.Printf("failed to initialise smtp mailer: %v", err)
 			log.Printf("falling back to console mailer")
@@ -399,18 +436,23 @@ func main() {
 		mailer:                   mailer,
 		verificationBaseURL:      verificationBaseURL,
 		verificationTokenTTL:     defaultVerificationTTL,
+		passwordResetBaseURL:     passwordResetBaseURL,
+		passwordResetTokenTTL:    passwordResetTTL,
 		disableVerificationEmail: cfg.DisableVerificationEmail,
 		pixelCostPoints:          int64(pixelCost),
 	}
 
 	log.Printf(
-		"startup config: config_path=%s storage_backend=%s verification_base_url=%s smtp_configured=%t disable_verification_email=%t pixel_cost_points=%d",
+		"startup config: config_path=%s storage_backend=%s verification_base_url=%s password_reset_base_url=%s reset_ttl=%s smtp_configured=%t disable_verification_email=%t pixel_cost_points=%d email_language=%s",
 		configPath,
 		storeDescription,
 		verificationBaseURL,
+		passwordResetBaseURL,
+		passwordResetTTL,
 		smtpConfigured,
 		cfg.DisableVerificationEmail,
 		pixelCost,
+		cfg.Email.Language,
 	)
 
 	router.POST("/api/register", server.handleRegister)
@@ -421,6 +463,8 @@ func main() {
 	router.POST("/api/activation-codes/redeem", server.handleRedeemActivationCode)
 	router.GET("/api/verify", server.handleVerifyAccount)
 	router.POST("/api/resend-verification", server.handleResendVerification)
+	router.POST("/api/password-reset/request", server.handlePasswordResetRequest)
+	router.POST("/api/password-reset/confirm", server.handlePasswordResetConfirm)
 
 	router.GET("/api/pixels", server.handleGetPixels)
 	router.POST("/api/pixels", server.handleUpdatePixel)
@@ -691,6 +735,46 @@ func (s *Server) issueVerificationToken(ctx context.Context, user storage.User) 
 	return "", errors.New("unable to create unique verification token")
 }
 
+func (s *Server) issuePasswordResetToken(ctx context.Context, user storage.User) (string, error) {
+	if user.ID <= 0 {
+		return "", errors.New("invalid user id")
+	}
+
+	if err := s.store.DeletePasswordResetTokensForUser(ctx, user.ID); err != nil {
+		log.Printf("cleanup password reset tokens for user_id=%d: %v", user.ID, err)
+	}
+
+	ttl := s.passwordResetTokenTTL
+	if ttl <= 0 {
+		ttl = time.Duration(config.Default().PasswordReset.TokenTTLHours) * time.Hour
+	}
+
+	for i := 0; i < 5; i++ {
+		token, err := generateVerificationToken()
+		if err != nil {
+			return "", fmt.Errorf("generate reset token: %w", err)
+		}
+		expires := time.Now().Add(ttl)
+
+		_, storeErr := s.store.CreatePasswordResetToken(ctx, token, user.ID, expires)
+		if storeErr == nil {
+			log.Printf(
+				"issuePasswordResetToken: stored token for user_id=%d expires_at=%s attempt=%d",
+				user.ID,
+				expires.Format(time.RFC3339),
+				i+1,
+			)
+			return token, nil
+		}
+		if !strings.Contains(strings.ToLower(storeErr.Error()), "token already exists") {
+			return "", storeErr
+		}
+	}
+
+	log.Printf("issuePasswordResetToken: failed to create unique token for user_id=%d", user.ID)
+	return "", errors.New("unable to create unique password reset token")
+}
+
 func (s *Server) handleVerifyAccount(c *gin.Context) {
 	if s.disableVerificationEmail {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Weryfikacja adresów e-mail jest wyłączona."})
@@ -796,6 +880,112 @@ func (s *Server) handleResendVerification(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Nowy link weryfikacyjny został wysłany."})
+}
+
+func (s *Server) handlePasswordResetRequest(c *gin.Context) {
+	var req passwordResetRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+
+	email := strings.TrimSpace(strings.ToLower(req.Email))
+	if email == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "email is required"})
+		return
+	}
+
+	const responseMessage = "Jeśli konto istnieje, wysłaliśmy instrukcje resetu hasła."
+
+	user, err := s.store.GetUserByEmail(c.Request.Context(), email)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusAccepted, gin.H{"message": responseMessage})
+			return
+		}
+		log.Printf("get user for password reset: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process request"})
+		return
+	}
+
+	token, err := s.issuePasswordResetToken(c.Request.Context(), user)
+	if err != nil {
+		log.Printf("issue password reset token: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare reset"})
+		return
+	}
+
+	link, err := buildPasswordResetLink(s.passwordResetBaseURL, token)
+	if err != nil {
+		log.Printf("build password reset link: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare reset"})
+		return
+	}
+
+	if err := s.mailer.SendPasswordResetEmail(c.Request.Context(), user.Email, link); err != nil {
+		log.Printf("send password reset email: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send reset email"})
+		return
+	}
+
+	c.JSON(http.StatusAccepted, gin.H{"message": responseMessage})
+}
+
+func (s *Server) handlePasswordResetConfirm(c *gin.Context) {
+	var req passwordResetConfirmRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+
+	token := strings.TrimSpace(req.Token)
+	password := strings.TrimSpace(req.Password)
+	if token == "" || password == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "token and password are required"})
+		return
+	}
+
+	record, err := s.store.GetPasswordResetToken(c.Request.Context(), token)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "nieprawidłowy lub wykorzystany token"})
+			return
+		}
+		log.Printf("get password reset token: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reset password"})
+		return
+	}
+
+	if time.Now().After(record.ExpiresAt) {
+		if delErr := s.store.DeletePasswordResetToken(c.Request.Context(), token); delErr != nil {
+			log.Printf("cleanup expired password reset token: %v", delErr)
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "token wygasł. Poproś o nowy link resetu hasła."})
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("hash password reset: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reset password"})
+		return
+	}
+
+	if err := s.store.UpdateUserPassword(c.Request.Context(), record.UserID, string(hash)); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "konto nie istnieje"})
+			return
+		}
+		log.Printf("update user password: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reset password"})
+		return
+	}
+
+	if err := s.store.DeletePasswordResetTokensForUser(c.Request.Context(), record.UserID); err != nil {
+		log.Printf("cleanup password reset tokens for user_id=%d: %v", record.UserID, err)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Hasło zostało zaktualizowane."})
 }
 
 func (s *Server) handleLogout(c *gin.Context) {

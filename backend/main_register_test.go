@@ -20,12 +20,21 @@ type fakeMailer struct {
 	sent          int
 	lastRecipient string
 	lastLink      string
+	resetSent     int
+	lastResetLink string
 }
 
 func (f *fakeMailer) SendVerificationEmail(ctx context.Context, recipient, verificationLink string) error {
 	f.sent++
 	f.lastRecipient = recipient
 	f.lastLink = verificationLink
+	return nil
+}
+
+func (f *fakeMailer) SendPasswordResetEmail(ctx context.Context, recipient, resetLink string) error {
+	f.resetSent++
+	f.lastRecipient = recipient
+	f.lastResetLink = resetLink
 	return nil
 }
 

@@ -38,6 +38,13 @@ type VerificationToken struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type PasswordResetToken struct {
+	Token     string    `json:"token"`
+	UserID    int64     `json:"user_id"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type PixelState struct {
 	Width  int     `json:"width"`
 	Height int     `json:"height"`
@@ -69,4 +76,9 @@ type Store interface {
 	DeleteVerificationToken(ctx context.Context, token string) error
 	DeleteVerificationTokensForUser(ctx context.Context, userID int64) error
 	MarkUserVerified(ctx context.Context, userID int64) error
+	CreatePasswordResetToken(ctx context.Context, token string, userID int64, expiresAt time.Time) (PasswordResetToken, error)
+	GetPasswordResetToken(ctx context.Context, token string) (PasswordResetToken, error)
+	DeletePasswordResetToken(ctx context.Context, token string) error
+	DeletePasswordResetTokensForUser(ctx context.Context, userID int64) error
+	UpdateUserPassword(ctx context.Context, userID int64, passwordHash string) error
 }

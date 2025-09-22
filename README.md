@@ -39,9 +39,14 @@ Kluczowe opcje:
 | Pole | Opis |
 | --- | --- |
 | `disableVerificationEmail` | Po ustawieniu na `true` nowi użytkownicy są automatycznie oznaczani jako zweryfikowani i nie są wysyłane żadne maile. |
+| `email.language` | Ustala język wiadomości transakcyjnych (np. `pl` lub `en`) wykorzystywanych przy weryfikacji konta i resetowaniu haseł. |
+| `passwordReset.baseUrl` | Opcjonalna baza URL używana do budowy linków resetujących hasło (domyślnie wartość zmiennej `PASSWORD_RESET_LINK_BASE_URL` lub adres weryfikacyjny). |
+| `passwordReset.tokenTtlHours` | Liczba godzin, przez które link resetujący hasło pozostaje ważny. |
 | `smtp` | (Opcjonalnie) konfiguracja transportu SMTP oparta na polach `host`, `port`, `username`, `password`, `fromEmail`, `fromName`. |
 
 Jeżeli sekcja `smtp` jest pominięta lub pusta, backend pozostaje w trybie developerskim – link aktywacyjny pojawia się w logach (ConsoleMailer). Po poprawnym uzupełnieniu danych zostanie użyty prawdziwy serwer SMTP.
+
+Reset haseł korzysta z endpointów `/api/password-reset/request` i `/api/password-reset/confirm`. Linki są budowane w oparciu o `passwordReset.baseUrl` (lub zmienną środowiskową `PASSWORD_RESET_LINK_BASE_URL`) i mają okres ważności określony przez `passwordReset.tokenTtlHours`.
 
 ### 💾 Przechowywanie danych backendu
 

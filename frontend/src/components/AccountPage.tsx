@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth, type AuthUser } from "../useAuth";
+import TermsFooter from "./TermsFooter";
 
 type AccountPixel = {
   id: number;
@@ -296,8 +297,9 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
   }, [editValue, editingId, navigate, openLoginModal, pixels]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200">
-      <div className="mx-auto flex max-w-5xl flex-col gap-8 px-4 py-12">
+    <div className="flex min-h-screen flex-col bg-slate-950 text-slate-200">
+      <main className="flex-1">
+        <div className="mx-auto flex max-w-5xl flex-col gap-8 px-4 py-12">
         <header className="space-y-2 text-center">
           <h1 className="text-3xl font-semibold text-blue-400">Twoje konto</h1>
           <p className="text-sm text-slate-400">Zarządzaj zakupionymi pikselami i aktualizuj adresy reklam.</p>
@@ -473,7 +475,9 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
             </div>
           )}
         </div>
-      </div>
+        </div>
+      </main>
+      <TermsFooter />
     </div>
   );
 }

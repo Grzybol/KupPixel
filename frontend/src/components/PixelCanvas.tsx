@@ -1,4 +1,5 @@
-import { MouseEvent, useEffect, useMemo, useRef } from "react";
+import { MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 
 export type Pixel = {
   id: number;
@@ -12,6 +13,7 @@ export type PixelCanvasProps = {
   height: number;
   pixels: Pixel[];
   onPixelClick: (pixel: Pixel) => void;
+  onSelectionComplete: (pixels: Pixel[]) => void;
 };
 
 const FREE_COLOR: [number, number, number] = [55, 65, 81];
@@ -42,8 +44,27 @@ function hexToRGB(color?: string): [number, number, number] {
   return [r, g, b];
 }
 
-export default function PixelCanvas({ width, height, pixels, onPixelClick }: PixelCanvasProps) {
+type SelectionRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export default function PixelCanvas({
+  width,
+  height,
+  pixels,
+  onPixelClick,
+  onSelectionComplete,
+}: PixelCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
+  const [previewPixels, setPreviewPixels] = useState<Pixel[]>([]);
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const isDraggingRef = useRef(false);
+  const didDragRef = useRef(false);
+  const preventClickRef = useRef(false);
 
   const data = useMemo(() => pixels, [pixels]);
 
@@ -66,33 +87,157 @@ export default function PixelCanvas({ width, height, pixels, onPixelClick }: Pix
     ctx.putImageData(imageData, 0, 0);
   }, [data, width, height]);
 
-  const handleClick = (event: MouseEvent<HTMLCanvasElement>) => {
+  const getCanvasPosition = (event: MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) {
+      return null;
+    }
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     const x = Math.floor((event.clientX - rect.left) * scaleX);
     const y = Math.floor((event.clientY - rect.top) * scaleY);
-    const index = y * width + x;
+    if (x < 0 || y < 0 || x >= width || y >= height) {
+      return null;
+    }
+    return { x, y, canvas };
+  };
+
+  const resetSelection = () => {
+    setSelectionRect(null);
+    setPreviewPixels([]);
+    dragStartRef.current = null;
+    isDraggingRef.current = false;
+    didDragRef.current = false;
+  };
+
+  const handleClick = (event: MouseEvent<HTMLCanvasElement>) => {
+    if (preventClickRef.current) {
+      preventClickRef.current = false;
+      return;
+    }
+
+    const position = getCanvasPosition(event);
+    if (!position) return;
+    const index = position.y * width + position.x;
     const pixel = data[index];
     if (pixel) {
       onPixelClick(pixel);
     }
   };
 
+  const handleMouseDown = (event: MouseEvent<HTMLCanvasElement>) => {
+    if (event.button !== 0) return;
+    const position = getCanvasPosition(event);
+    if (!position) return;
+    dragStartRef.current = { x: position.x, y: position.y };
+    isDraggingRef.current = true;
+    didDragRef.current = false;
+    preventClickRef.current = false;
+    setSelectionRect(null);
+    setPreviewPixels([]);
+  };
+
+  const handleMouseMove = (event: MouseEvent<HTMLCanvasElement>) => {
+    if (!isDraggingRef.current || !dragStartRef.current) return;
+    const position = getCanvasPosition(event);
+    if (!position) return;
+
+    const start = dragStartRef.current;
+    const minX = Math.min(start.x, position.x);
+    const minY = Math.min(start.y, position.y);
+    const maxX = Math.max(start.x, position.x);
+    const maxY = Math.max(start.y, position.y);
+
+    if (maxX !== minX || maxY !== minY) {
+      didDragRef.current = true;
+    }
+
+    const rect: SelectionRect = {
+      x: minX,
+      y: minY,
+      width: maxX - minX + 1,
+      height: maxY - minY + 1,
+    };
+
+    const freePixels: Pixel[] = [];
+    for (let py = rect.y; py < rect.y + rect.height; py++) {
+      const row = py * width;
+      for (let px = rect.x; px < rect.x + rect.width; px++) {
+        const pixel = data[row + px];
+        if (pixel && pixel.status === "free") {
+          freePixels.push(pixel);
+        }
+      }
+    }
+
+    setSelectionRect(rect);
+    setPreviewPixels(freePixels);
+  };
+
+  const finalizeSelection = () => {
+    if (!didDragRef.current) {
+      resetSelection();
+      return;
+    }
+
+    preventClickRef.current = true;
+    onSelectionComplete([...previewPixels]);
+    resetSelection();
+  };
+
+  const handleMouseUp = (event: MouseEvent<HTMLCanvasElement>) => {
+    if (event.button !== 0) return;
+    if (!isDraggingRef.current) return;
+    finalizeSelection();
+  };
+
+  const handleMouseLeave = () => {
+    if (isDraggingRef.current) {
+      preventClickRef.current = true;
+    }
+    resetSelection();
+  };
+
   return (
-    <canvas
-      ref={canvasRef}
-      width={width}
-      height={height}
-      onClick={handleClick}
-      className="w-full max-w-4xl border border-slate-700 rounded-lg shadow-md"
-      style={{
-        imageRendering: "pixelated",
-        aspectRatio: `${width} / ${height}`,
-        backgroundColor: "#111827"
-      }}
-    />
+    <div className="relative w-full max-w-4xl">
+      <canvas
+        ref={canvasRef}
+        width={width}
+        height={height}
+        onClick={handleClick}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseLeave}
+        className="w-full border border-slate-700 rounded-lg shadow-md"
+        style={{
+          imageRendering: "pixelated",
+          aspectRatio: `${width} / ${height}`,
+          backgroundColor: "#111827"
+        }}
+      />
+      {selectionRect && (
+        <div
+          className="pointer-events-none absolute border-2 border-blue-400/80 bg-blue-400/10"
+          style={(() => {
+            const canvas = canvasRef.current;
+            if (!canvas) {
+              return { display: "none" } as CSSProperties;
+            }
+            const displayWidth = canvas.clientWidth;
+            const displayHeight = canvas.clientHeight;
+            return {
+              left: `${(selectionRect.x / width) * displayWidth}px`,
+              top: `${(selectionRect.y / height) * displayHeight}px`,
+              width: `${(selectionRect.width / width) * displayWidth}px`,
+              height: `${(selectionRect.height / height) * displayHeight}px`,
+            } as CSSProperties;
+          })()}
+        >
+          <span className="sr-only">{previewPixels.length} wolnych pikseli zaznaczonych</span>
+        </div>
+      )}
+    </div>
   );
 }

@@ -81,12 +81,18 @@ func (c *stubConn) ExecContext(_ context.Context, query string, args []driver.Na
 		if len(args) == 0 {
 			return nil, errors.New("missing pixel id")
 		}
-		id, err := asInt(args[0].Value)
-		if err != nil {
-			return nil, err
+		if len(args)%2 != 0 {
+			return nil, errors.New("unexpected argument count")
 		}
-		c.state.insert(id)
-		return driver.RowsAffected(1), nil
+
+		for i := 0; i < len(args); i += 2 {
+			id, err := asInt(args[i].Value)
+			if err != nil {
+				return nil, err
+			}
+			c.state.insert(id)
+		}
+		return driver.RowsAffected(len(args) / 2), nil
 	}
 	return driver.RowsAffected(0), nil
 }
@@ -193,25 +199,66 @@ func asInt(value any) (int, error) {
 }
 
 func TestEnsureSchemaSeedsMissingPixels(t *testing.T) {
-	existing := []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
-	state := newStubDBState(existing)
+	t.Parallel()
 
-	connector := &stubConnector{state: state}
-	db := sql.OpenDB(connector)
-	defer db.Close()
-
-	store := &Store{db: db}
-
-	if err := store.EnsureSchema(context.Background()); err != nil {
-		t.Fatalf("EnsureSchema() error = %v", err)
+	tests := []struct {
+		name        string
+		existing    []int
+		skip        bool
+		wantCount   int
+		mustContain []int
+	}{
+		{
+			name:        "noExisting",
+			existing:    nil,
+			wantCount:   storage.TotalPixels,
+			mustContain: []int{0, storage.TotalPixels - 1, 500500},
+		},
+		{
+			name:        "someExisting",
+			existing:    []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
+			wantCount:   storage.TotalPixels,
+			mustContain: []int{0, storage.TotalPixels - 1, 500500},
+		},
+		{
+			name:      "skipSeeding",
+			existing:  []int{1, 2, 3},
+			skip:      true,
+			wantCount: 3,
+		},
 	}
 
-	if got := state.count(); got != storage.TotalPixels {
-		t.Fatalf("unexpected pixel count: got %d want %d", got, storage.TotalPixels)
-	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			state := newStubDBState(tt.existing)
 
-	const targetID = 500500
-	if !state.has(targetID) {
-		t.Fatalf("expected pixel %d to be present", targetID)
+			connector := &stubConnector{state: state}
+			db := sql.OpenDB(connector)
+			t.Cleanup(func() { db.Close() })
+
+			store := &Store{db: db}
+			store.SetSkipPixelSeed(tt.skip)
+
+			if err := store.EnsureSchema(context.Background()); err != nil {
+				t.Fatalf("EnsureSchema() error = %v", err)
+			}
+
+			if got := state.count(); got != tt.wantCount {
+				t.Fatalf("unexpected pixel count: got %d want %d", got, tt.wantCount)
+			}
+
+			for _, existing := range tt.existing {
+				if !state.has(existing) {
+					t.Fatalf("expected pre-existing pixel %d to remain", existing)
+				}
+			}
+
+			for _, id := range tt.mustContain {
+				if !state.has(id) {
+					t.Fatalf("expected pixel %d to be present", id)
+				}
+			}
+		})
 	}
 }

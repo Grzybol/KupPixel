@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../useAuth";
 import ResendVerificationForm from "./ResendVerificationForm";
-import TermsFooter from "./TermsFooter";
 
 type VerifyStatus = "idle" | "loading" | "success" | "error";
 
@@ -72,10 +71,8 @@ export default function VerifyAccountPage() {
   }, [openLoginModal]);
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-950 text-slate-200">
-      <main className="flex-1">
-        <div className="flex min-h-full flex-col items-center justify-center px-4 py-16 text-center">
-          <div className="w-full max-w-xl rounded-3xl bg-slate-900/80 p-10 shadow-2xl ring-1 ring-white/10">
+    <div className="flex min-h-full flex-col items-center justify-center px-4 py-16 text-center text-slate-200">
+      <div className="w-full max-w-xl rounded-3xl bg-slate-900/80 p-10 shadow-2xl ring-1 ring-white/10">
             <h1 className="text-3xl font-semibold text-blue-400">Potwierdzenie adresu e-mail</h1>
             {status === "loading" && (
               <div className="mt-6 space-y-3 text-sm text-slate-300">
@@ -133,10 +130,7 @@ export default function VerifyAccountPage() {
                 </div>
               </div>
             )}
-          </div>
-        </div>
-      </main>
-      <TermsFooter />
+      </div>
     </div>
   );
 }

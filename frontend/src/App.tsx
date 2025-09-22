@@ -7,6 +7,7 @@ import VerifyAccountPage from "./components/VerifyAccountPage";
 import AccountPage from "./components/AccountPage";
 import ActivationCodeModal from "./components/ActivationCodeModal";
 import TermsFooter from "./components/TermsFooter";
+import NavigationBar from "./components/NavigationBar";
 import TermsPage from "./components/TermsPage";
 import { useAuth } from "./useAuth";
 
@@ -71,15 +72,10 @@ function usePixels() {
   return { data, loading, error } as const;
 }
 
-type LandingPageProps = {
-  onOpenRegister: () => void;
-  onOpenActivationCode: () => void;
-};
-
-function LandingPage({ onOpenRegister, onOpenActivationCode }: LandingPageProps) {
+function LandingPage() {
   const navigate = useNavigate();
   const { data, loading, error } = usePixels();
-  const { user, ensureAuthenticated, openLoginModal, logout, pixelCostPoints } = useAuth();
+  const { user, ensureAuthenticated, pixelCostPoints } = useAuth();
   const [selectedPixels, setSelectedPixels] = useState<Pixel[]>([]);
 
   const handlePixelClick = useCallback(
@@ -160,54 +156,6 @@ function LandingPage({ onOpenRegister, onOpenActivationCode }: LandingPageProps)
             )}
           </div>
         )}
-        <div className="mt-6 flex items-center justify-center gap-4 text-sm text-slate-300">
-          {user ? (
-            <>
-              <span className="rounded-full bg-slate-800/80 px-4 py-2 text-slate-200">
-                Zalogowano jako <span className="font-semibold">{user.email}</span>
-              </span>
-              <button
-                type="button"
-                onClick={onOpenActivationCode}
-                className="rounded-full bg-emerald-500/90 px-4 py-2 font-semibold text-emerald-950 shadow-lg transition hover:bg-emerald-400"
-              >
-                Aktywuj kod
-              </button>
-              <Link
-                to="/account"
-                className="rounded-full bg-slate-800/70 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-700"
-              >
-                Twoje konto
-              </Link>
-              <button
-                type="button"
-                onClick={() => void logout()}
-                className="rounded-full bg-slate-800/70 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-700"
-              >
-                Wyloguj
-              </button>
-            </>
-          ) : (
-            <div className="flex flex-col items-stretch gap-3 sm:flex-row">
-              <button
-                type="button"
-                onClick={onOpenRegister}
-                className="rounded-full bg-blue-500 px-6 py-2 font-semibold text-white shadow-lg transition hover:bg-blue-400"
-              >
-                Załóż konto
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  void openLoginModal({ message: "Zaloguj się, aby rozpocząć." });
-                }}
-                className="rounded-full bg-slate-800/70 px-6 py-2 font-semibold text-slate-200 transition hover:bg-slate-700"
-              >
-                Zaloguj się
-              </button>
-            </div>
-          )}
-        </div>
       </header>
       <main className="mx-auto flex max-w-5xl flex-col items-center gap-6 px-4 pb-16">
         {loading && <div className="text-slate-300">Ładuję siatkę pikseli...</div>}
@@ -628,9 +576,16 @@ function BuyPixelPage() {
   );
 }
 
-function PageLayout({ children }: { children: ReactNode }) {
+type PageLayoutProps = {
+  children: ReactNode;
+  onOpenRegister?: () => void;
+  onOpenActivationCode?: () => void;
+};
+
+function PageLayout({ children, onOpenRegister, onOpenActivationCode }: PageLayoutProps) {
   return (
     <div className="flex min-h-screen flex-col bg-slate-950 text-slate-100">
+      <NavigationBar onOpenRegister={onOpenRegister} onOpenActivationCode={onOpenActivationCode} />
       <main className="flex-1">{children}</main>
       <TermsFooter />
     </div>
@@ -676,17 +631,31 @@ export default function App() {
         <Route
           path="/"
           element={
-            <PageLayout>
-              <LandingPage onOpenRegister={handleOpenRegister} onOpenActivationCode={handleOpenActivationCode} />
+            <PageLayout onOpenRegister={handleOpenRegister} onOpenActivationCode={handleOpenActivationCode}>
+              <LandingPage />
             </PageLayout>
           }
         />
-        <Route path="/account" element={<AccountPage onOpenActivationCode={handleOpenActivationCode} />} />
-        <Route path="/verify" element={<VerifyAccountPage />} />
+        <Route
+          path="/account"
+          element={
+            <PageLayout onOpenActivationCode={handleOpenActivationCode}>
+              <AccountPage onOpenActivationCode={handleOpenActivationCode} />
+            </PageLayout>
+          }
+        />
+        <Route
+          path="/verify"
+          element={
+            <PageLayout onOpenRegister={handleOpenRegister}>
+              <VerifyAccountPage />
+            </PageLayout>
+          }
+        />
         <Route
           path="/buy"
           element={
-            <PageLayout>
+            <PageLayout onOpenRegister={handleOpenRegister} onOpenActivationCode={handleOpenActivationCode}>
               <BuyPixelPage />
             </PageLayout>
           }
@@ -694,7 +663,7 @@ export default function App() {
         <Route
           path="/buy/:pixelId"
           element={
-            <PageLayout>
+            <PageLayout onOpenRegister={handleOpenRegister} onOpenActivationCode={handleOpenActivationCode}>
               <BuyPixelPage />
             </PageLayout>
           }
@@ -702,7 +671,7 @@ export default function App() {
         <Route
           path="/terms"
           element={
-            <PageLayout>
+            <PageLayout onOpenRegister={handleOpenRegister}>
               <TermsPage />
             </PageLayout>
           }
@@ -710,7 +679,7 @@ export default function App() {
         <Route
           path="*"
           element={
-            <PageLayout>
+            <PageLayout onOpenRegister={handleOpenRegister}>
               <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-slate-300">
                 <h2 className="text-2xl font-semibold text-white">Ups! Nie znaleziono strony.</h2>
                 <Link to="/" className="text-blue-400 underline">

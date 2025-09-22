@@ -8,14 +8,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/example/kup-piksel/internal/storage"
 	_ "github.com/mattn/go-sqlite3"
 )
 
-const (
-	GridWidth     = 1000
-	GridHeight    = 1000
-	TotalPixels   = GridWidth * GridHeight
-	busyTimeoutMs = 5000
+const busyTimeoutMs = 5000
+
+type (
+	Pixel             = storage.Pixel
+	User              = storage.User
+	VerificationToken = storage.VerificationToken
+	PixelState        = storage.PixelState
 )
 
 type Store struct {
@@ -23,42 +26,7 @@ type Store struct {
 	skipPixelSeed bool
 }
 
-type Pixel struct {
-	ID        int       `json:"id"`
-	Status    string    `json:"status"`
-	Color     string    `json:"color,omitempty"`
-	URL       string    `json:"url,omitempty"`
-	OwnerID   *int64    `json:"owner_id,omitempty"`
-	UpdatedAt time.Time `json:"updated_at,omitempty"`
-}
-
-type User struct {
-	ID           int64      `json:"id"`
-	Email        string     `json:"email"`
-	PasswordHash string     `json:"-"`
-	CreatedAt    time.Time  `json:"created_at"`
-	IsVerified   bool       `json:"is_verified"`
-	VerifiedAt   *time.Time `json:"verified_at,omitempty"`
-	Points       int64      `json:"points"`
-}
-
-type VerificationToken struct {
-	Token     string    `json:"token"`
-	UserID    int64     `json:"user_id"`
-	ExpiresAt time.Time `json:"expires_at"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-var (
-	ErrPixelOwnedByAnotherUser = errors.New("pixel owned by another user")
-	ErrInsufficientPoints      = errors.New("insufficient points")
-)
-
-type PixelState struct {
-	Width  int     `json:"width"`
-	Height int     `json:"height"`
-	Pixels []Pixel `json:"pixels"`
-}
+var _ storage.Store = (*Store)(nil)
 
 func (s *Store) GetPixelsByOwner(ctx context.Context, ownerID int64) ([]Pixel, error) {
 	if ownerID <= 0 {
@@ -142,7 +110,7 @@ func (s *Store) SetSkipPixelSeed(skip bool) {
 // InsertPixel ensures a pixel row exists with the provided attributes. It is intended for tests where
 // the full grid is not populated.
 func (s *Store) InsertPixel(ctx context.Context, pixel Pixel) error {
-	if pixel.ID < 0 || pixel.ID >= TotalPixels {
+	if pixel.ID < 0 || pixel.ID >= storage.TotalPixels {
 		return fmt.Errorf("invalid pixel id: %d", pixel.ID)
 	}
 
@@ -262,7 +230,7 @@ func (s *Store) EnsureSchema(ctx context.Context) (err error) {
 	}
 
 	if count == 0 && !s.skipPixelSeed {
-		for i := 0; i < TotalPixels; i++ {
+		for i := 0; i < storage.TotalPixels; i++ {
 			if ctx.Err() != nil {
 				err = ctx.Err()
 				return err
@@ -308,7 +276,7 @@ func (s *Store) GetAllPixels(ctx context.Context) (PixelState, error) {
 	}
 	defer rows.Close()
 
-	pixels := make([]Pixel, 0, TotalPixels)
+	pixels := make([]Pixel, 0, storage.TotalPixels)
 	for rows.Next() {
 		var pixel Pixel
 		var owner sql.NullInt64
@@ -334,11 +302,11 @@ func (s *Store) GetAllPixels(ctx context.Context) (PixelState, error) {
 		return PixelState{}, fmt.Errorf("iterate pixels: %w", err)
 	}
 
-	return PixelState{Width: GridWidth, Height: GridHeight, Pixels: pixels}, nil
+	return PixelState{Width: storage.GridWidth, Height: storage.GridHeight, Pixels: pixels}, nil
 }
 
 func (s *Store) UpdatePixel(ctx context.Context, pixel Pixel) (updated Pixel, err error) {
-	if pixel.ID < 0 || pixel.ID >= TotalPixels {
+	if pixel.ID < 0 || pixel.ID >= storage.TotalPixels {
 		return Pixel{}, fmt.Errorf("invalid pixel id: %d", pixel.ID)
 	}
 
@@ -411,7 +379,7 @@ func (s *Store) UpdatePixelForUserWithCost(ctx context.Context, userID int64, pi
 	if userID <= 0 {
 		return Pixel{}, User{}, errors.New("invalid user id")
 	}
-	if pixel.ID < 0 || pixel.ID >= TotalPixels {
+	if pixel.ID < 0 || pixel.ID >= storage.TotalPixels {
 		return Pixel{}, User{}, fmt.Errorf("invalid pixel id: %d", pixel.ID)
 	}
 	if cost < 0 {
@@ -461,7 +429,7 @@ func (s *Store) UpdatePixelForUserWithCost(ctx context.Context, userID int64, pi
 			return Pixel{}, User{}, err
 		}
 		if currentOwner.Valid && currentOwner.Int64 != userID {
-			err = ErrPixelOwnedByAnotherUser
+			err = storage.ErrPixelOwnedByAnotherUser
 			return Pixel{}, User{}, err
 		}
 		if !currentOwner.Valid || currentOwner.Int64 != userID {
@@ -474,7 +442,7 @@ func (s *Store) UpdatePixelForUserWithCost(ctx context.Context, userID int64, pi
 		updated.OwnerID = &owner
 	} else {
 		if currentOwner.Valid && currentOwner.Int64 != userID {
-			err = ErrPixelOwnedByAnotherUser
+			err = storage.ErrPixelOwnedByAnotherUser
 			return Pixel{}, User{}, err
 		}
 		updated.Status = "free"
@@ -485,7 +453,7 @@ func (s *Store) UpdatePixelForUserWithCost(ctx context.Context, userID int64, pi
 
 	if chargeCost {
 		if currentPoints < cost {
-			err = ErrInsufficientPoints
+			err = storage.ErrInsufficientPoints
 			return Pixel{}, User{}, err
 		}
 		chargeQuery := fmt.Sprintf("UPDATE users SET user_points = user_points - %d WHERE id = %d AND user_points >= %d", cost, userID, cost)
@@ -500,7 +468,7 @@ func (s *Store) UpdatePixelForUserWithCost(ctx context.Context, userID int64, pi
 			return Pixel{}, User{}, err
 		}
 		if affected == 0 {
-			err = ErrInsufficientPoints
+			err = storage.ErrInsufficientPoints
 			return Pixel{}, User{}, err
 		}
 		currentPoints -= cost

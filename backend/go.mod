@@ -17,8 +17,6 @@ require (
 
 replace github.com/gin-gonic/gin => ./internal/ginlite
 
-replace github.com/go-sql-driver/mysql => ./internal/mysqlstub
-
 replace github.com/mattn/go-sqlite3 => ./internal/sqlite3
 
 replace golang.org/x/crypto/bcrypt => ./internal/bcrypt

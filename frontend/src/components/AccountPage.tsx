@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth, type AuthUser } from "../useAuth";
-import TermsFooter from "./TermsFooter";
 
 type AccountPixel = {
   id: number;
@@ -297,20 +296,18 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
   }, [editValue, editingId, navigate, openLoginModal, pixels]);
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-950 text-slate-200">
-      <main className="flex-1">
-        <div className="mx-auto flex max-w-5xl flex-col gap-8 px-4 py-12">
-        <header className="space-y-2 text-center">
-          <h1 className="text-3xl font-semibold text-blue-400">Twoje konto</h1>
-          <p className="text-sm text-slate-400">Zarządzaj zakupionymi pikselami i aktualizuj adresy reklam.</p>
-          {currentUserEmail && (
-            <p className="text-sm text-slate-300">
-              Zalogowano jako <span className="font-semibold text-white">{currentUserEmail}</span>
-            </p>
-          )}
-        </header>
+    <div className="mx-auto flex max-w-5xl flex-col gap-8 px-4 py-12 text-slate-200">
+      <header className="space-y-2 text-center">
+        <h1 className="text-3xl font-semibold text-blue-400">Twoje konto</h1>
+        <p className="text-sm text-slate-400">Zarządzaj zakupionymi pikselami i aktualizuj adresy reklam.</p>
+        {currentUserEmail && (
+          <p className="text-sm text-slate-300">
+            Zalogowano jako <span className="font-semibold text-white">{currentUserEmail}</span>
+          </p>
+        )}
+      </header>
 
-        <section className="grid gap-4 rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl sm:grid-cols-2 lg:grid-cols-3">
+      <section className="grid gap-4 rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl sm:grid-cols-2 lg:grid-cols-3">
           <div className="rounded-2xl border border-slate-800/60 bg-slate-950/60 p-4">
             <p className="text-sm font-semibold text-slate-100">Saldo punktów</p>
             <p className="mt-2 text-2xl font-bold text-emerald-400">{pointsBalance} pkt</p>
@@ -347,9 +344,9 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
               </button>
             </div>
           </div>
-        </section>
+      </section>
 
-        <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
+      <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-xl font-semibold text-slate-100">Wykupione piksele</h2>
             <Link to="/" className="text-sm font-semibold text-blue-400 hover:text-blue-300">
@@ -474,10 +471,7 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
               )}
             </div>
           )}
-        </div>
-        </div>
-      </main>
-      <TermsFooter />
+      </div>
     </div>
   );
 }

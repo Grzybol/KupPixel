@@ -1,11 +1,14 @@
-import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { type ChangeEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { Link, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import PixelCanvas, { Pixel } from "./components/PixelCanvas";
 import LoginModal from "./components/LoginModal";
 import RegisterModal from "./components/RegisterModal";
 import VerifyAccountPage from "./components/VerifyAccountPage";
 import AccountPage from "./components/AccountPage";
 import ActivationCodeModal from "./components/ActivationCodeModal";
+import TermsFooter from "./components/TermsFooter";
+import NavigationBar from "./components/NavigationBar";
+import TermsPage from "./components/TermsPage";
 import { useAuth } from "./useAuth";
 
 type PixelResponse = {
@@ -69,15 +72,11 @@ function usePixels() {
   return { data, loading, error } as const;
 }
 
-type LandingPageProps = {
-  onOpenRegister: () => void;
-  onOpenActivationCode: () => void;
-};
-
-function LandingPage({ onOpenRegister, onOpenActivationCode }: LandingPageProps) {
+function LandingPage() {
   const navigate = useNavigate();
   const { data, loading, error } = usePixels();
-  const { user, ensureAuthenticated, openLoginModal, logout, pixelCostPoints } = useAuth();
+  const { user, ensureAuthenticated, pixelCostPoints } = useAuth();
+  const [selectedPixels, setSelectedPixels] = useState<Pixel[]>([]);
 
   const handlePixelClick = useCallback(
     async (pixel: Pixel) => {
@@ -94,6 +93,35 @@ function LandingPage({ onOpenRegister, onOpenActivationCode }: LandingPageProps)
       navigate(`/buy/${pixel.id}`);
     },
     [ensureAuthenticated, navigate]
+  );
+
+  const handleSelectionComplete = useCallback(
+    async (freePixels: Pixel[]) => {
+      setSelectedPixels(freePixels);
+      if (freePixels.length <= 1) {
+        if (freePixels.length === 1) {
+          await handlePixelClick(freePixels[0]);
+        }
+        return;
+      }
+
+      const authenticated = await ensureAuthenticated({
+        message: "Zaloguj się, aby kupić zaznaczone piksele.",
+      });
+      if (!authenticated) {
+        return;
+      }
+
+      const ids = freePixels.map((pixel) => pixel.id);
+      navigate(
+        {
+          pathname: "/buy",
+          search: `?ids=${ids.join(",")}`,
+        },
+        { state: { pixelIds: ids } }
+      );
+    },
+    [ensureAuthenticated, handlePixelClick, navigate]
   );
 
   const heroStats = useMemo(() => {
@@ -128,54 +156,6 @@ function LandingPage({ onOpenRegister, onOpenActivationCode }: LandingPageProps)
             )}
           </div>
         )}
-        <div className="mt-6 flex items-center justify-center gap-4 text-sm text-slate-300">
-          {user ? (
-            <>
-              <span className="rounded-full bg-slate-800/80 px-4 py-2 text-slate-200">
-                Zalogowano jako <span className="font-semibold">{user.email}</span>
-              </span>
-              <button
-                type="button"
-                onClick={onOpenActivationCode}
-                className="rounded-full bg-emerald-500/90 px-4 py-2 font-semibold text-emerald-950 shadow-lg transition hover:bg-emerald-400"
-              >
-                Aktywuj kod
-              </button>
-              <Link
-                to="/account"
-                className="rounded-full bg-slate-800/70 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-700"
-              >
-                Twoje konto
-              </Link>
-              <button
-                type="button"
-                onClick={() => void logout()}
-                className="rounded-full bg-slate-800/70 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-700"
-              >
-                Wyloguj
-              </button>
-            </>
-          ) : (
-            <div className="flex flex-col items-stretch gap-3 sm:flex-row">
-              <button
-                type="button"
-                onClick={onOpenRegister}
-                className="rounded-full bg-blue-500 px-6 py-2 font-semibold text-white shadow-lg transition hover:bg-blue-400"
-              >
-                Załóż konto
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  void openLoginModal({ message: "Zaloguj się, aby rozpocząć." });
-                }}
-                className="rounded-full bg-slate-800/70 px-6 py-2 font-semibold text-slate-200 transition hover:bg-slate-700"
-              >
-                Zaloguj się
-              </button>
-            </div>
-          )}
-        </div>
       </header>
       <main className="mx-auto flex max-w-5xl flex-col items-center gap-6 px-4 pb-16">
         {loading && <div className="text-slate-300">Ładuję siatkę pikseli...</div>}
@@ -186,29 +166,82 @@ function LandingPage({ onOpenRegister, onOpenActivationCode }: LandingPageProps)
             height={data.height}
             pixels={data.pixels}
             onPixelClick={handlePixelClick}
+            onSelectionComplete={handleSelectionComplete}
           />
         )}
+        {selectedPixels.length > 1 && (
+          <div className="w-full max-w-2xl rounded-xl border border-blue-500/20 bg-blue-500/5 px-4 py-3 text-center text-sm text-blue-100">
+            Zaznaczono {selectedPixels.length} wolnych pikseli. Dokończ zakup na stronie formularza, aby zarezerwować wszystkie.
+          </div>
+        )}
         <p className="max-w-2xl text-center text-sm text-slate-400">
-          Kliknij dowolny piksel, aby przejść do strony zakupu lub obejrzeć reklamę.
+          Kliknij pojedynczy piksel, aby przejść do strony zakupu lub obejrzeć reklamę. Możesz też przeciągnąć myszą, aby
+          zaznaczyć blok wolnych pikseli i kupić kilka naraz.
         </p>
       </main>
     </div>
   );
 }
 
+type PixelPurchaseResult = {
+  id: number;
+  status?: string;
+  error?: string;
+};
+
 function BuyPixelPage() {
   const { pixelId } = useParams<{ pixelId: string }>();
+  const location = useLocation();
   const { ensureAuthenticated, openLoginModal, user, pixelCostPoints, refresh } = useAuth();
-  const id = useMemo(() => {
+  const singleId = useMemo(() => {
     if (!pixelId) return null;
     const parsed = Number(pixelId);
     return Number.isFinite(parsed) ? parsed : null;
   }, [pixelId]);
+  const selectedIds = useMemo(() => {
+    const ids = new Set<number>();
+    if (singleId !== null) {
+      ids.add(singleId);
+    }
+
+    const state = (location.state as { pixelIds?: unknown } | null) ?? null;
+    if (state && Array.isArray(state.pixelIds)) {
+      for (const value of state.pixelIds) {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) {
+          ids.add(parsed);
+        }
+      }
+    }
+
+    const params = new URLSearchParams(location.search);
+    const idsParam = params.get("ids");
+    if (idsParam) {
+      for (const raw of idsParam.split(",")) {
+        const trimmed = raw.trim();
+        if (!trimmed) continue;
+        const parsed = Number(trimmed);
+        if (Number.isFinite(parsed)) {
+          ids.add(parsed);
+        }
+      }
+    }
+
+    return Array.from(ids).sort((a, b) => a - b);
+  }, [location.search, location.state, singleId]);
+  const selectedCount = selectedIds.length;
+  const totalCost = useMemo(() => {
+    if (typeof pixelCostPoints !== "number" || pixelCostPoints <= 0) {
+      return null;
+    }
+    return pixelCostPoints * selectedCount;
+  }, [pixelCostPoints, selectedCount]);
   const [selectedColor, setSelectedColor] = useState("#ff4d4f");
   const [isProcessing, setIsProcessing] = useState(false);
-  const [purchaseStatus, setPurchaseStatus] = useState<null | "success">(null);
+  const [purchaseStatus, setPurchaseStatus] = useState<null | "success" | "partial">(null);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
   const [url, setUrl] = useState("https://example.com");
+  const [pixelResults, setPixelResults] = useState<PixelPurchaseResult[]>([]);
 
   useEffect(() => {
     setSelectedColor("#ff4d4f");
@@ -216,7 +249,8 @@ function BuyPixelPage() {
     setPurchaseStatus(null);
     setPurchaseError(null);
     setUrl("https://example.com");
-  }, [id]);
+    setPixelResults([]);
+  }, [selectedIds.join(",")]);
 
   const handleColorChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     setSelectedColor(event.target.value);
@@ -227,15 +261,19 @@ function BuyPixelPage() {
   }, []);
 
   const handleSimulatePurchase = useCallback(async () => {
-    if (id === null) return;
+    if (selectedIds.length === 0) {
+      setPurchaseError("Wybierz co najmniej jeden piksel, aby kontynuować.");
+      return;
+    }
 
     setIsProcessing(true);
     setPurchaseStatus(null);
     setPurchaseError(null);
+    setPixelResults([]);
 
     try {
       const authenticated = await ensureAuthenticated({
-        message: "Zaloguj się, aby kupić ten piksel.",
+        message: "Zaloguj się, aby kupić zaznaczone piksele.",
       });
       if (!authenticated) {
         throw new Error("Aby kontynuować, zaloguj się.");
@@ -246,7 +284,9 @@ function BuyPixelPage() {
           "Content-Type": "application/json",
         },
         credentials: "include",
-        body: JSON.stringify({ id, status: "taken", color: selectedColor, url }),
+        body: JSON.stringify({
+          pixels: selectedIds.map((pixelId) => ({ id: pixelId, status: "taken", color: selectedColor, url })),
+        }),
       });
 
       if (!response.ok) {
@@ -255,6 +295,25 @@ function BuyPixelPage() {
           throw new Error("Twoja sesja wygasła. Zaloguj się ponownie.");
         }
         const payload = await response.json().catch(() => null);
+        if (payload && Array.isArray((payload as { results?: unknown }).results)) {
+          const mapped = (payload as { results: unknown }).results as unknown[];
+          setPixelResults(
+            mapped
+              .map((item) => {
+                if (!item || typeof item !== "object") return null;
+                const base = item as { id?: unknown; error?: unknown; pixel?: { status?: unknown } };
+                const parsedId = Number(base.id);
+                if (!Number.isFinite(parsedId)) return null;
+                const status = base.pixel && typeof base.pixel === "object" ? (base.pixel as { status?: unknown }).status : undefined;
+                return {
+                  id: parsedId,
+                  status: typeof status === "string" ? status : undefined,
+                  error: typeof base.error === "string" ? base.error : undefined,
+                } satisfies PixelPurchaseResult;
+              })
+              .filter((item): item is PixelPurchaseResult => Boolean(item))
+          );
+        }
         const apiMessage =
           payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).error === "string"
             ? ((payload as Record<string, unknown>).error as string)
@@ -267,8 +326,49 @@ function BuyPixelPage() {
         throw new Error(apiMessage || `Błąd API: ${response.status}`);
       }
 
-      setPurchaseStatus("success");
-      await refresh().catch(() => undefined);
+      const payload = (await response.json().catch(() => null)) as
+        | null
+        | {
+            results?: unknown;
+            user?: unknown;
+            error?: unknown;
+          };
+
+      const results: PixelPurchaseResult[] = Array.isArray(payload?.results)
+        ? (payload?.results as unknown[])
+            .map((item) => {
+              if (!item || typeof item !== "object") return null;
+              const base = item as { id?: unknown; error?: unknown; pixel?: { status?: unknown } };
+              const parsedId = Number(base.id);
+              if (!Number.isFinite(parsedId)) return null;
+              const status = base.pixel && typeof base.pixel === "object" ? (base.pixel as { status?: unknown }).status : undefined;
+              return {
+                id: parsedId,
+                status: typeof status === "string" ? status : undefined,
+                error: typeof base.error === "string" ? base.error : undefined,
+              } satisfies PixelPurchaseResult;
+            })
+            .filter((item): item is PixelPurchaseResult => Boolean(item))
+        : [];
+
+      setPixelResults(results);
+
+      const successfulCount = results.filter((result) => !result.error).length;
+      if (successfulCount === results.length && successfulCount > 0) {
+        setPurchaseStatus("success");
+        await refresh().catch(() => undefined);
+      } else if (successfulCount > 0) {
+        setPurchaseStatus("partial");
+        await refresh().catch(() => undefined);
+        setPurchaseError("Nie wszystkie piksele udało się kupić. Sprawdź szczegóły poniżej.");
+      } else {
+        const errorMessage =
+          (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).error === "string"
+            ? ((payload as Record<string, unknown>).error as string)
+            : null) ||
+          "Nie udało się zarezerwować żadnego z zaznaczonych pikseli. Spróbuj ponownie.";
+        setPurchaseError(errorMessage);
+      }
     } catch (error) {
       console.error(error);
       const message = error instanceof Error ? error.message : "Nie udało się zarezerwować piksela. Spróbuj ponownie.";
@@ -276,25 +376,45 @@ function BuyPixelPage() {
     } finally {
       setIsProcessing(false);
     }
-  }, [ensureAuthenticated, id, openLoginModal, refresh, selectedColor, url]);
+  }, [ensureAuthenticated, openLoginModal, refresh, selectedColor, selectedIds, url]);
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center px-6 py-12 text-center">
       <div className="w-full max-w-2xl rounded-3xl bg-slate-900/60 p-10 shadow-xl">
-        <h2 className="text-3xl font-semibold text-blue-400">Kup ten piksel</h2>
+        <h2 className="text-3xl font-semibold text-blue-400">
+          {selectedCount > 1 ? "Kup wybrane piksele" : "Kup ten piksel"}
+        </h2>
         <p className="mt-3 text-slate-300">
-          Wybrałeś piksel o ID {" "}
-          <span className="font-mono text-white">{id ?? "nieznany"}</span>. Tutaj możesz dobrać kolor i
-          przejść przez fikcyjny proces płatności, aby zobaczyć, jak będzie działał prawdziwy checkout.
+          {selectedCount > 1 ? (
+            <>
+              Wybrałeś {selectedCount} wolnych pikseli o ID: {" "}
+              <span className="font-mono text-white">{selectedIds.join(", ")}</span>. Tutaj możesz dobrać kolor i przejść przez
+              fikcyjny proces płatności, aby zobaczyć, jak będzie działał prawdziwy checkout.
+            </>
+          ) : (
+            <>
+              Wybrałeś piksel o ID {" "}
+              <span className="font-mono text-white">{selectedIds[0] ?? "nieznany"}</span>. Tutaj możesz dobrać kolor i przejść
+              przez fikcyjny proces płatności, aby zobaczyć, jak będzie działał prawdziwy checkout.
+            </>
+          )}
         </p>
 
         <div className="mt-6 grid gap-3 text-left text-sm text-slate-300 sm:grid-cols-2">
           <div className="rounded-xl border border-slate-800/70 bg-slate-900/70 p-4">
             <p className="font-semibold text-slate-100">Koszt zakupu</p>
             <p className="mt-1 text-slate-300">
-              {typeof pixelCostPoints === "number" && pixelCostPoints > 0
-                ? `${pixelCostPoints} punktów`
-                : "Sprawdź konfigurację"}
+              {typeof pixelCostPoints === "number" && pixelCostPoints > 0 ? (
+                selectedCount > 1 && totalCost !== null ? (
+                  <>
+                    {selectedCount} × {pixelCostPoints} pkt = {totalCost} punktów
+                  </>
+                ) : (
+                  `${pixelCostPoints} punktów`
+                )
+              ) : (
+                "Sprawdź konfigurację"
+              )}
             </p>
           </div>
           <div className="rounded-xl border border-slate-800/70 bg-slate-900/70 p-4">
@@ -355,7 +475,7 @@ function BuyPixelPage() {
           <button
             type="button"
             onClick={handleSimulatePurchase}
-            disabled={isProcessing || id === null}
+            disabled={isProcessing || selectedCount === 0}
             className="mt-8 inline-flex items-center justify-center rounded-full bg-blue-500 px-6 py-3 font-semibold text-white shadow-lg transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-70"
           >
             {isProcessing ? (
@@ -364,7 +484,7 @@ function BuyPixelPage() {
                 Przetwarzanie płatności...
               </span>
             ) : (
-              "Zasymuluj zakup"
+              (selectedCount > 1 ? `Zasymuluj zakup ${selectedCount} pikseli` : "Zasymuluj zakup")
             )}
           </button>
 
@@ -379,6 +499,23 @@ function BuyPixelPage() {
               {purchaseError}
             </p>
           )}
+          {pixelResults.length > 0 && (
+            <div className="mt-6 rounded-xl border border-slate-700 bg-slate-900/60 p-4">
+              <h4 className="text-sm font-semibold text-slate-200">Rezultaty zakupu</h4>
+              <ul className="mt-3 space-y-2 text-sm text-slate-300">
+                {pixelResults.map((result) => (
+                  <li key={result.id} className="flex items-start justify-between gap-4">
+                    <span className="font-mono text-slate-200">#{result.id}</span>
+                    {result.error ? (
+                      <span className="text-rose-400">{result.error}</span>
+                    ) : (
+                      <span className="text-emerald-300">{result.status === "taken" ? "Kupiono" : result.status}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
         {purchaseStatus === "success" && (
@@ -388,9 +525,17 @@ function BuyPixelPage() {
           >
             <h3 className="text-xl font-semibold text-emerald-300">Udało się!</h3>
             <p className="mt-2 text-sm">
-              Piksel <span className="font-mono">#{id}</span> został zarezerwowany z kolorem
-              {" "}
-              <span className="font-mono">{selectedColor.toUpperCase()}</span>.
+              {selectedCount > 1 ? (
+                <>
+                  Wszystkie {selectedCount} piksele zostały zarezerwowane z kolorem {" "}
+                  <span className="font-mono">{selectedColor.toUpperCase()}</span>.
+                </>
+              ) : (
+                <>
+                  Piksel <span className="font-mono">#{selectedIds[0]}</span> został zarezerwowany z kolorem {" "}
+                  <span className="font-mono">{selectedColor.toUpperCase()}</span>.
+                </>
+              )}
             </p>
             <div className="mt-4 flex items-center gap-3">
               <span className="text-sm text-emerald-200">Podgląd:</span>
@@ -405,6 +550,18 @@ function BuyPixelPage() {
             </p>
           </div>
         )}
+        {purchaseStatus === "partial" && (
+          <div
+            role="status"
+            className="mt-8 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-6 text-left text-amber-100"
+          >
+            <h3 className="text-xl font-semibold text-amber-200">Częściowy sukces</h3>
+            <p className="mt-2 text-sm">
+              Część pikseli została zakupiona, ale kilka wymaga ponownej próby. Sprawdź szczegóły powyżej i spróbuj ponownie
+              po rozwiązaniu problemów.
+            </p>
+          </div>
+        )}
 
         <div className="mt-10">
           <Link
@@ -415,6 +572,22 @@ function BuyPixelPage() {
           </Link>
         </div>
       </div>
+    </div>
+  );
+}
+
+type PageLayoutProps = {
+  children: ReactNode;
+  onOpenRegister?: () => void;
+  onOpenActivationCode?: () => void;
+};
+
+function PageLayout({ children, onOpenRegister, onOpenActivationCode }: PageLayoutProps) {
+  return (
+    <div className="flex min-h-screen flex-col bg-slate-950 text-slate-100">
+      <NavigationBar onOpenRegister={onOpenRegister} onOpenActivationCode={onOpenActivationCode} />
+      <main className="flex-1">{children}</main>
+      <TermsFooter />
     </div>
   );
 }
@@ -457,20 +630,63 @@ export default function App() {
       <Routes>
         <Route
           path="/"
-          element={<LandingPage onOpenRegister={handleOpenRegister} onOpenActivationCode={handleOpenActivationCode} />}
+          element={
+            <PageLayout onOpenRegister={handleOpenRegister} onOpenActivationCode={handleOpenActivationCode}>
+              <LandingPage />
+            </PageLayout>
+          }
         />
-        <Route path="/account" element={<AccountPage onOpenActivationCode={handleOpenActivationCode} />} />
-        <Route path="/verify" element={<VerifyAccountPage />} />
-        <Route path="/buy/:pixelId" element={<BuyPixelPage />} />
+        <Route
+          path="/account"
+          element={
+            <PageLayout onOpenActivationCode={handleOpenActivationCode}>
+              <AccountPage onOpenActivationCode={handleOpenActivationCode} />
+            </PageLayout>
+          }
+        />
+        <Route
+          path="/verify"
+          element={
+            <PageLayout onOpenRegister={handleOpenRegister}>
+              <VerifyAccountPage />
+            </PageLayout>
+          }
+        />
+        <Route
+          path="/buy"
+          element={
+            <PageLayout onOpenRegister={handleOpenRegister} onOpenActivationCode={handleOpenActivationCode}>
+              <BuyPixelPage />
+            </PageLayout>
+          }
+        />
+        <Route
+          path="/buy/:pixelId"
+          element={
+            <PageLayout onOpenRegister={handleOpenRegister} onOpenActivationCode={handleOpenActivationCode}>
+              <BuyPixelPage />
+            </PageLayout>
+          }
+        />
+        <Route
+          path="/terms"
+          element={
+            <PageLayout onOpenRegister={handleOpenRegister}>
+              <TermsPage />
+            </PageLayout>
+          }
+        />
         <Route
           path="*"
           element={
-            <div className="flex min-h-screen flex-col items-center justify-center gap-3 text-center text-slate-300">
-              <h2 className="text-2xl font-semibold text-white">Ups! Nie znaleziono strony.</h2>
-              <Link to="/" className="text-blue-400 underline">
-                Wróć na tablicę pikseli
-              </Link>
-            </div>
+            <PageLayout onOpenRegister={handleOpenRegister}>
+              <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-slate-300">
+                <h2 className="text-2xl font-semibold text-white">Ups! Nie znaleziono strony.</h2>
+                <Link to="/" className="text-blue-400 underline">
+                  Wróć na tablicę pikseli
+                </Link>
+              </div>
+            </PageLayout>
           }
         />
       </Routes>

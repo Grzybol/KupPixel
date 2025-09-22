@@ -33,11 +33,21 @@ import (
 //go:embed frontend_dist/*
 var frontendFS embed.FS
 
-type UpdatePixelRequest struct {
+type PixelUpdate struct {
 	ID     int    `json:"id"`
 	Status string `json:"status"`
 	Color  string `json:"color"`
 	URL    string `json:"url"`
+}
+
+type UpdatePixelRequest struct {
+	Pixels []PixelUpdate `json:"pixels"`
+}
+
+type PixelUpdateResult struct {
+	ID    int            `json:"id"`
+	Pixel *storage.Pixel `json:"pixel,omitempty"`
+	Error string         `json:"error,omitempty"`
 }
 
 type Server struct {
@@ -883,50 +893,104 @@ func (s *Server) handleUpdatePixel(c *gin.Context) {
 		return
 	}
 
-	if req.ID < 0 || req.ID >= storage.TotalPixels {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pixel id"})
+	if len(req.Pixels) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no pixels provided"})
 		return
 	}
 
-	if strings.ToLower(req.Status) == "taken" {
-		if req.Color == "" || req.URL == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "taken pixels require color and url"})
-			return
+	results := make([]PixelUpdateResult, 0, len(req.Pixels))
+	currentUser := user
+	var anySuccess bool
+	var firstErrStatus int
+	var firstErrMessage string
+
+	for _, item := range req.Pixels {
+		result := PixelUpdateResult{ID: item.ID}
+		if item.ID < 0 || item.ID >= storage.TotalPixels {
+			result.Error = "invalid pixel id"
+			if firstErrStatus == 0 {
+				firstErrStatus = http.StatusBadRequest
+				firstErrMessage = result.Error
+			}
+			results = append(results, result)
+			continue
 		}
-		req.Status = "taken"
-	} else {
-		req.Status = "free"
-		req.Color = ""
-		req.URL = ""
+
+		pixel := storage.Pixel{ID: item.ID}
+		if strings.ToLower(item.Status) == "taken" {
+			color := strings.TrimSpace(item.Color)
+			url := strings.TrimSpace(item.URL)
+			if color == "" || url == "" {
+				result.Error = "taken pixels require color and url"
+				if firstErrStatus == 0 {
+					firstErrStatus = http.StatusBadRequest
+					firstErrMessage = result.Error
+				}
+				results = append(results, result)
+				continue
+			}
+			pixel.Status = "taken"
+			pixel.Color = color
+			pixel.URL = url
+		} else {
+			pixel.Status = "free"
+			pixel.Color = ""
+			pixel.URL = ""
+		}
+
+		updatedPixel, updatedUser, err := s.store.UpdatePixelForUserWithCost(c.Request.Context(), user.ID, pixel, s.pixelCostPoints)
+		if err != nil {
+			status := http.StatusInternalServerError
+			switch {
+			case errors.Is(err, sql.ErrNoRows):
+				result.Error = "pixel not found"
+				status = http.StatusNotFound
+			case errors.Is(err, storage.ErrPixelOwnedByAnotherUser):
+				result.Error = "pixel already owned"
+				status = http.StatusForbidden
+			case errors.Is(err, storage.ErrInsufficientPoints):
+				result.Error = "brak wystarczającej liczby punktów. Aktywuj kod, aby zdobyć więcej."
+				status = http.StatusForbidden
+			default:
+				result.Error = "failed to update pixel"
+				log.Printf("update pixel %d: %v", item.ID, err)
+			}
+
+			if firstErrStatus == 0 {
+				firstErrStatus = status
+				firstErrMessage = result.Error
+			}
+			results = append(results, result)
+			continue
+		}
+
+		anySuccess = true
+		currentUser = updatedUser
+		result.Pixel = &updatedPixel
+		results = append(results, result)
 	}
 
-	updated, updatedUser, err := s.store.UpdatePixelForUserWithCost(c.Request.Context(), user.ID, storage.Pixel{
-		ID:     req.ID,
-		Status: req.Status,
-		Color:  req.Color,
-		URL:    req.URL,
-	}, s.pixelCostPoints)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "pixel not found"})
-			return
+	if !anySuccess {
+		status := firstErrStatus
+		if status == 0 {
+			status = http.StatusBadRequest
 		}
-		if errors.Is(err, storage.ErrPixelOwnedByAnotherUser) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "pixel already owned"})
-			return
+		message := firstErrMessage
+		if message == "" {
+			message = "failed to update pixels"
 		}
-		if errors.Is(err, storage.ErrInsufficientPoints) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "brak wystarczającej liczby punktów. Aktywuj kod, aby zdobyć więcej."})
-			return
-		}
-		log.Printf("update pixel %d: %v", req.ID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update pixel"})
+		c.JSON(status, gin.H{
+			"error":             message,
+			"results":           results,
+			"user":              sanitizeUser(currentUser),
+			"pixel_cost_points": s.pixelCostPoints,
+		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"pixel":             updated,
-		"user":              sanitizeUser(updatedUser),
+		"results":           results,
+		"user":              sanitizeUser(currentUser),
 		"pixel_cost_points": s.pixelCostPoints,
 	})
 }

@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../useAuth";
 import ResendVerificationForm from "./ResendVerificationForm";
 
@@ -12,6 +13,7 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
   const { register } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -20,6 +22,7 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
   const resetState = useCallback(() => {
     setEmail("");
     setPassword("");
+    setAcceptedTerms(false);
     setError(null);
     setIsSubmitting(false);
     setIsSuccess(false);
@@ -36,6 +39,10 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       setError(null);
+      if (!acceptedTerms) {
+        setError("Aby utworzyć konto, zaakceptuj regulamin.");
+        return;
+      }
       setIsSubmitting(true);
       try {
         const result = await register({ email, password });
@@ -50,7 +57,7 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
         setIsSubmitting(false);
       }
     },
-    [email, password, register, resetState, onClose]
+    [acceptedTerms, email, password, register]
   );
 
   if (!isOpen) {
@@ -146,6 +153,28 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
               />
             </label>
 
+            <label className="flex items-start gap-3 text-xs text-slate-300">
+              <input
+                type="checkbox"
+                checked={acceptedTerms}
+                onChange={(event) => {
+                  setAcceptedTerms(event.target.checked);
+                  if (event.target.checked) {
+                    setError(null);
+                  }
+                }}
+                disabled={isSubmitting}
+                className="mt-1 h-4 w-4 rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-400"
+              />
+              <span>
+                Akceptuję {" "}
+                <Link to="/terms" className="font-semibold text-blue-300 underline-offset-2 hover:underline">
+                  Regulamin
+                </Link>{" "}
+                serwisu.
+              </span>
+            </label>
+
             {error && (
               <p role="alert" className="text-sm text-rose-400">
                 {error}
@@ -179,7 +208,7 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
                 <button
                   type="submit"
                   className="inline-flex items-center justify-center rounded-full bg-blue-500 px-5 py-2 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-70"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || !acceptedTerms}
                 >
                   {isSubmitting ? "Tworzenie..." : "Zarejestruj się"}
                 </button>

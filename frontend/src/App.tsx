@@ -1,4 +1,4 @@
-import { type ChangeEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import PixelCanvas, { Pixel } from "./components/PixelCanvas";
 import LoginModal from "./components/LoginModal";
@@ -6,6 +6,8 @@ import RegisterModal from "./components/RegisterModal";
 import VerifyAccountPage from "./components/VerifyAccountPage";
 import AccountPage from "./components/AccountPage";
 import ActivationCodeModal from "./components/ActivationCodeModal";
+import TermsFooter from "./components/TermsFooter";
+import TermsPage from "./components/TermsPage";
 import { useAuth } from "./useAuth";
 
 type PixelResponse = {
@@ -626,6 +628,15 @@ function BuyPixelPage() {
   );
 }
 
+function PageLayout({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex min-h-screen flex-col bg-slate-950 text-slate-100">
+      <main className="flex-1">{children}</main>
+      <TermsFooter />
+    </div>
+  );
+}
+
 export default function App() {
   const { openLoginModal, refresh } = useAuth();
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
@@ -664,21 +675,49 @@ export default function App() {
       <Routes>
         <Route
           path="/"
-          element={<LandingPage onOpenRegister={handleOpenRegister} onOpenActivationCode={handleOpenActivationCode} />}
+          element={
+            <PageLayout>
+              <LandingPage onOpenRegister={handleOpenRegister} onOpenActivationCode={handleOpenActivationCode} />
+            </PageLayout>
+          }
         />
         <Route path="/account" element={<AccountPage onOpenActivationCode={handleOpenActivationCode} />} />
         <Route path="/verify" element={<VerifyAccountPage />} />
-        <Route path="/buy" element={<BuyPixelPage />} />
-        <Route path="/buy/:pixelId" element={<BuyPixelPage />} />
+        <Route
+          path="/buy"
+          element={
+            <PageLayout>
+              <BuyPixelPage />
+            </PageLayout>
+          }
+        />
+        <Route
+          path="/buy/:pixelId"
+          element={
+            <PageLayout>
+              <BuyPixelPage />
+            </PageLayout>
+          }
+        />
+        <Route
+          path="/terms"
+          element={
+            <PageLayout>
+              <TermsPage />
+            </PageLayout>
+          }
+        />
         <Route
           path="*"
           element={
-            <div className="flex min-h-screen flex-col items-center justify-center gap-3 text-center text-slate-300">
-              <h2 className="text-2xl font-semibold text-white">Ups! Nie znaleziono strony.</h2>
-              <Link to="/" className="text-blue-400 underline">
-                Wróć na tablicę pikseli
-              </Link>
-            </div>
+            <PageLayout>
+              <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-slate-300">
+                <h2 className="text-2xl font-semibold text-white">Ups! Nie znaleziono strony.</h2>
+                <Link to="/" className="text-blue-400 underline">
+                  Wróć na tablicę pikseli
+                </Link>
+              </div>
+            </PageLayout>
           }
         />
       </Routes>

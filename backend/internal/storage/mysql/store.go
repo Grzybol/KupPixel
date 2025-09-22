@@ -129,21 +129,39 @@ func (s *Store) EnsureSchema(ctx context.Context) (err error) {
 	}
 
 	if count < storage.TotalPixels && !s.skipPixelSeed {
-		now := time.Now().UTC()
-		stmt, prepErr := tx.PrepareContext(ctx, `INSERT INTO pixels (id, status, color, url, owner_id, updated_at) VALUES (?, 'free', '', '', NULL, ?) ON DUPLICATE KEY UPDATE id = id`)
-		if prepErr != nil {
-			err = fmt.Errorf("prepare pixel seed: %w", prepErr)
-			return err
-		}
-		defer stmt.Close()
+		const batchSize = 1000
 
-		for i := 0; i < storage.TotalPixels; i++ {
+		now := time.Now().UTC()
+		base := "INSERT INTO pixels (id, status, color, url, owner_id, updated_at) VALUES "
+		suffix := " ON DUPLICATE KEY UPDATE id = id"
+
+		for start := 0; start < storage.TotalPixels; start += batchSize {
 			if ctx.Err() != nil {
 				err = ctx.Err()
 				return err
 			}
-			if _, execErr := stmt.ExecContext(ctx, i, now); execErr != nil {
-				err = fmt.Errorf("seed pixel %d: %w", i, execErr)
+
+			end := start + batchSize
+			if end > storage.TotalPixels {
+				end = storage.TotalPixels
+			}
+
+			var builder strings.Builder
+			builder.Grow(len(base) + len(suffix) + (end-start)*len("(?, 'free', '', '', NULL, ?),"))
+			builder.WriteString(base)
+
+			args := make([]any, 0, 2*(end-start))
+			for i := start; i < end; i++ {
+				if i > start {
+					builder.WriteByte(',')
+				}
+				builder.WriteString("(?, 'free', '', '', NULL, ?)")
+				args = append(args, i, now)
+			}
+			builder.WriteString(suffix)
+
+			if _, execErr := tx.ExecContext(ctx, builder.String(), args...); execErr != nil {
+				err = fmt.Errorf("seed pixel batch starting at %d: %w", start, execErr)
 				return err
 			}
 		}

@@ -1,4 +1,5 @@
 import { FormEvent, useCallback, useEffect, useId, useState } from "react";
+import { useI18n } from "../lang/I18nProvider";
 
 type ResendVerificationFormProps = {
   initialEmail?: string;
@@ -11,6 +12,7 @@ export default function ResendVerificationForm({ initialEmail = "", className }:
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const inputId = useId();
+  const { t } = useI18n();
 
   useEffect(() => {
     setEmail(initialEmail);
@@ -33,33 +35,33 @@ export default function ResendVerificationForm({ initialEmail = "", className }:
         });
         const payload = await response.json().catch(() => null);
         if (!response.ok) {
-          const message =
-            (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).error === "string"
-              ? ((payload as Record<string, unknown>).error as string)
-              : null) || "Nie udało się wysłać wiadomości. Spróbuj ponownie.";
+        const message =
+          (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).error === "string"
+            ? ((payload as Record<string, unknown>).error as string)
+            : null) || t("auth.errors.resend");
           throw new Error(message);
         }
         const message =
           payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).message === "string"
             ? ((payload as Record<string, unknown>).message as string)
-            : "Wysłaliśmy nowy link weryfikacyjny.";
+            : t("auth.messages.resendSuccess");
         setSuccess(message);
       } catch (err) {
         console.error("resend verification", err);
-        const message = err instanceof Error ? err.message : "Nie udało się wysłać wiadomości.";
+        const message = err instanceof Error ? err.message : t("auth.errors.resendGeneric");
         setError(message);
       } finally {
         setIsSubmitting(false);
       }
     },
-    [email]
+    [email, t]
   );
 
   return (
     <form onSubmit={handleSubmit} className={className ?? "space-y-3"}>
       <div className="space-y-2">
         <label className="block text-sm font-medium text-slate-200" htmlFor={inputId}>
-          Adres e-mail
+          {t("common.labels.email")}
         </label>
         <input
           id={inputId}
@@ -67,12 +69,12 @@ export default function ResendVerificationForm({ initialEmail = "", className }:
           value={email}
           onChange={(event) => setEmail(event.target.value)}
           className="w-full rounded-lg border border-slate-700 bg-slate-900/70 px-4 py-3 text-slate-100 shadow-inner focus:border-blue-400 focus:outline-none"
-          placeholder="adres@email.pl"
+          placeholder={t("common.placeholders.email")}
           required
           disabled={isSubmitting}
           autoComplete="email"
         />
-        <p className="text-xs text-slate-400">Wpisz swój adres, aby otrzymać nowy link weryfikacyjny.</p>
+        <p className="text-xs text-slate-400">{t("auth.messages.verificationEmailInfo")}</p>
       </div>
       {error && (
         <p role="alert" className="text-sm text-rose-400">
@@ -90,7 +92,7 @@ export default function ResendVerificationForm({ initialEmail = "", className }:
           className="inline-flex items-center justify-center rounded-full bg-blue-500 px-5 py-2 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-70"
           disabled={isSubmitting}
         >
-          {isSubmitting ? "Wysyłanie..." : "Wyślij ponownie"}
+          {isSubmitting ? t("resend.submitting") : t("resend.submit")}
         </button>
       </div>
     </form>

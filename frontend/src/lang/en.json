@@ -1,0 +1,346 @@
+{
+  "common": {
+    "appName": "Kup Pixel",
+    "languageLabel": "Language",
+    "actions": {
+      "activate": "Activate",
+      "activateCode": "Redeem code",
+      "cancel": "Cancel",
+      "close": "Close",
+      "editUrl": "Edit URL",
+      "goBack": "← Back to the board",
+      "goHome": "Back to home",
+      "login": "Log in",
+      "loginCta": "Sign in",
+      "logout": "Log out",
+      "openLogin": "Go to login",
+      "openRegister": "Create account",
+      "readTerms": "Read the terms",
+      "refresh": "Refresh data",
+      "register": "Register",
+      "resend": "Send again",
+      "save": "Save",
+      "simulatePurchase": "Simulate purchase",
+      "submit": "Submit"
+    },
+    "labels": {
+      "email": "Email address",
+      "password": "Password",
+      "pixelColor": "Pixel color",
+      "pixelUrl": "Ad URL",
+      "activationCode": "Activation code",
+      "balance": "Balance",
+      "pixelCost": "Pixel cost"
+    },
+    "placeholders": {
+      "pixelUrl": "https://your-domain.com",
+      "email": "address@email.com",
+      "activationCode": "XXXX-XXXX-XXXX-XXXX"
+    },
+    "status": {
+      "loading": "Loading...",
+      "processing": "Processing payment...",
+      "sending": "Sending..."
+    },
+    "units": {
+      "points": "{{count}} points",
+      "pointsShort": "pts"
+    }
+  },
+  "navigation": {
+    "home": "Home",
+    "account": "Your account",
+    "activateCode": "Redeem code",
+    "balance": "Balance: {{points}} pts",
+    "pixelCost": "Pixel cost: {{points}} pts",
+    "loginPrompt": "Sign in to get started."
+  },
+  "auth": {
+    "errors": {
+      "refresh": "Failed to refresh the session ({{status}})",
+      "parseUser": "Could not read account details.",
+      "login": "Failed to sign in. Please try again.",
+      "register": "Failed to create the account. Please try again.",
+      "logout": "Failed to reserve the pixel. Please try again.",
+      "purchase": "Unable to reserve any of the selected pixels. Please try again.",
+      "fetchPixels": "Failed to fetch pixel board.",
+      "account": "An error occurred while loading the account.",
+      "savePixel": "Failed to save changes.",
+      "activateCode": "Failed to redeem the code.",
+      "resend": "Failed to send the message. Please try again.",
+      "resendGeneric": "Failed to send the message.",
+      "verify": "Could not confirm the email address.",
+      "verifyMissingToken": "Verification token is missing from the URL.",
+      "verifyUnexpected": "An unexpected error occurred. Please try again later.",
+      "api": "API error: {{status}}",
+      "requiresLogin": "Sign in to continue.",
+      "insufficientPoints": "Not enough points to buy a pixel. Redeem a code and try again.",
+      "invalidUrl": "The URL must include a valid scheme (e.g. https://).",
+      "missingUrl": "Enter a valid URL.",
+      "missingColor": "This pixel has no color assigned and cannot be updated.",
+      "activationFormat": "The code must follow XXXX-XXXX-XXXX-XXXX and contain only letters or digits.",
+      "sessionExpired": "Your session expired. Please sign in again.",
+      "sessionExpiredLong": "Your session expired. Sign in again and try once more.",
+      "loginRequired": "Sign in to view the pixel board.",
+      "loginToView": "Sign in to view your account details.",
+      "loginToViewPixels": "Sign in again to view your pixels.",
+      "loginToUpdate": "Sign in to update the ad URL.",
+      "loginToBuy": "Sign in to buy this pixel.",
+      "loginToBuyMany": "Sign in to buy the selected pixels.",
+      "loginToProceed": "Sign in to buy the selected pixels.",
+      "loginToStart": "Sign in to get started.",
+      "loginToFinish": "Sign in again to finish the purchase.",
+      "selectionRequired": "Select at least one pixel to continue."
+    },
+    "messages": {
+      "registerSuccess": "Account created. Check your inbox.",
+      "loginModalDefault": "Enter your credentials to continue.",
+      "activationInfo": "Redeem a code to receive points and buy pixels.",
+      "activationCost": "One pixel costs {{points}} points.",
+      "activationSuccess": "Code redeemed successfully.",
+      "activationSuccessWithPoints": "Code redeemed! Added {{added}} points{{suffix}}",
+      "activationSuffix": " (total {{total}} pts).",
+      "resendPrompt": "Didn't receive the email? Send a new verification link.",
+      "resendSuccess": "We have sent a new verification link.",
+      "verifySuccess": "Email address confirmed. You can sign in now.",
+      "verifyLoading": "Verifying the token...",
+      "verificationEmailInfo": "Enter your email address to receive a new verification link.",
+      "simulationProcessing": "Virtual payment confirmation in progress. This will only take a moment...",
+      "simulationInfo": "The simulation does not charge real money – it's only a preview of the future flow.",
+      "simulationPartial": "Some pixels could not be reserved. Check the details below.",
+      "accountUpdated": "Ad URL has been updated.",
+      "registerTermsError": "Accept the terms to create an account.",
+      "registerInfo": "Enter your email and password to create an account and start playing with the board.",
+      "registerEmailInfo": "We have sent you an email with an activation link. Click it to finish registration.",
+      "registerHelp": "Can't find the email? Check spam or wait a few minutes. You can also resend the link below.",
+      "accountBalanceHint": "Redeem codes to earn more points and claim additional pixels.",
+      "accountPixelCostHint": "You need at least this many points to claim a new pixel.",
+      "accountManageHint": "Redeem a code or refresh the data to view the current balance.",
+      "accountNoPixels": "You have not purchased any pixels yet.",
+      "accountLoading": "Loading account data...",
+      "accountPixels": "Purchased pixels",
+      "accountLoggedInAs": "Signed in as {{email}}",
+      "accountIntro": "Manage your purchased pixels and update ad destinations.",
+      "loginPrompt": "Enter your credentials to continue.",
+      "verifyResendTitle": "Send the link again",
+      "verifyResendDescription": "Enter your email address to receive a new verification token.",
+      "verifyErrorTitle": "Could not verify the account",
+      "verifyReady": "All set!"
+    }
+  },
+  "landing": {
+    "title": "Kup Pixel",
+    "subtitle": "Pick your pixel on a 1000×1000 digital board and leave your mark.",
+    "stats": {
+      "taken": "Taken: {{count}}",
+      "free": "Free: {{count}}"
+    },
+    "balance": {
+      "label": "Balance: {{points}} pts",
+      "pixelCost": "Pixel cost: {{points}} pts",
+      "missing": "Check configuration",
+      "loggedOut": "Sign in"
+    },
+    "loading": "Loading the pixel grid...",
+    "instructionsTitle": "How to use the board:",
+    "instructions": {
+      "single": "Click a single pixel to edit it or open the owner's ad link.",
+      "multi": "Drag with the left mouse button to select a block of free pixels and buy them together.",
+      "pan": "Hold {{ctrl}} or {{shift}} while dragging to smoothly pan across the board.",
+      "zoom": "Zooming in reveals a helper grid that makes counting and precise positioning easier."
+    },
+    "selection": "Selected {{count}} free pixels. Finish the purchase on the form page to reserve them all.",
+    "tips": "The tips above will help you navigate quickly — from single clicks through selecting areas to smooth panning and precise work when zoomed in.",
+    "linkOpen": "Open in a new tab"
+  },
+  "buy": {
+    "titleSingle": "Buy this pixel",
+    "titleMultiple": "Buy selected pixels",
+    "descriptionSingle": "You picked pixel ID {{id}}. Choose a color and go through the mock checkout to see how the real flow will behave.",
+    "descriptionMultiple": "You picked {{count}} free pixels with IDs: {{ids}}. Choose a color and go through the mock checkout to see how the real flow will behave.",
+    "unknownPixel": "unknown",
+    "costTitle": "Purchase cost",
+    "balanceTitle": "Your balance",
+    "configure": "Check configuration",
+    "balanceLogin": "Sign in",
+    "matchTitle": "Customize your pixel",
+    "matchDescription": "Pick a color that represents your brand – the preview and HEX value update automatically.",
+    "colorPreviewLabel": "Color preview",
+    "urlHint": "Visitors will be redirected to this address when they click the pixel.",
+    "simulateSingle": "Simulate purchase",
+    "simulateMultiple": "Simulate purchase of {{count}} pixels",
+    "costBreakdown": "{{count}} × {{price}} {{unit}} = {{total}} points",
+    "singlePrice": "{{price}} {{unit}}",
+    "successTitle": "Success!",
+    "successDescriptionSingle": "Pixel #{{id}} has been reserved with color {{color}}.",
+    "successDescriptionMultiple": "All {{count}} pixels have been reserved with color {{color}}.",
+    "successPreview": "Preview:",
+    "successMockInfo": "This is still a mock payment – the production flow will include a real checkout and customer confirmations.",
+    "partialTitle": "Partial success",
+    "partialDescription": "Some pixels were purchased, but a few need another attempt. Review the details above and try again after resolving the issues.",
+    "resultsTitle": "Purchase results",
+    "resultStatus": {
+      "taken": "Purchased"
+    },
+    "return": "Back to the board"
+  },
+  "pixelCanvas": {
+    "selection": "Selected {{count}} free pixels"
+  },
+  "account": {
+    "title": "Your account",
+    "saldoTitle": "Point balance",
+    "pixelCostTitle": "Pixel price",
+    "manageTitle": "Manage balance",
+    "activate": "Redeem code",
+    "refresh": "Refresh data",
+    "noData": "No data",
+    "table": {
+      "id": "ID",
+      "position": "Position",
+      "color": "Color",
+      "url": "URL",
+      "updatedAt": "Last updated",
+      "actions": "Actions",
+      "noUrl": "None",
+      "coordinates": "x: {{x}}, y: {{y}}"
+    },
+    "modal": {
+      "title": "Redeem a point code",
+      "currentBalance": "Current balance: {{points}} pts"
+    }
+  },
+  "activationModal": {
+    "title": "Redeem a point code",
+    "info": "Redeem a code to receive points and buy pixels.",
+    "currentBalance": "Current balance: {{points}} pts",
+    "error": "Failed to redeem the code.",
+    "submit": "Redeem",
+    "submitting": "Redeeming..."
+  },
+  "loginModal": {
+    "title": "Sign in",
+    "close": "Close",
+    "cancel": "Cancel",
+    "submit": "Log in",
+    "submitting": "Signing in..."
+  },
+  "registerModal": {
+    "title": "Create account",
+    "successTitle": "Confirm your email",
+    "terms": "I accept the service {{termsLink}}.",
+    "termsLink": "Terms of Use",
+    "loginCta": "Already have an account? Sign in",
+    "submit": "Register",
+    "submitting": "Creating..."
+  },
+  "resend": {
+    "title": "Email address",
+    "hint": "Enter your address to receive a new verification link.",
+    "submit": "Send again",
+    "submitting": "Sending..."
+  },
+  "verify": {
+    "title": "Email verification",
+    "loading": "Verifying the token...",
+    "success": "Email address confirmed. You can sign in now.",
+    "goToLogin": "Go to login",
+    "goHome": "Back to home"
+  },
+  "notFound": {
+    "title": "Oops! Page not found.",
+    "cta": "Back to the pixel board"
+  },
+  "termsFooter": {
+    "disclaimer": "Using the service means you accept the terms.",
+    "cta": "Read the terms"
+  },
+  "terms": {
+    "title": "KupPixel Terms of Service",
+    "intro": "These terms describe how KupPixel works, including service scope, responsibilities and the complaint procedure. By using the service you accept the provisions below.",
+    "sections": [
+      {
+        "title": "1. General provisions",
+        "paragraphs": [
+          "1.1. KupPixel Sp. z o.o. based in Warsaw operates the service.",
+          "1.2. The terms define how to use KupPixel, including registration, purchasing pixel slots and publishing content.",
+          "1.3. Using the service requires accepting the terms and having an active user account."
+        ]
+      },
+      {
+        "title": "2. Registration and account",
+        "paragraphs": [
+          "2.1. Registration is voluntary and requires completing the form and confirming your email address.",
+          "2.2. Users must provide accurate data and keep it up to date. The operator is not responsible for issues caused by incorrect contact details.",
+          "2.3. Users must protect their login credentials. All actions taken after signing in are treated as the user's actions."
+        ]
+      },
+      {
+        "title": "3. Buying and managing pixels",
+        "paragraphs": [
+          "3.1. Pixels can be purchased according to the current price list expressed in points or other units shown in the service.",
+          "3.2. After purchasing, the user may add graphics, links or text as long as it does not violate law, good manners or third-party rights.",
+          "3.3. The operator may refuse to publish or remove content that breaks the rules or law. In such cases no refund is granted if the breach was caused by the user."
+        ]
+      },
+      {
+        "title": "4. Limited liability",
+        "paragraphs": [
+          "4.1. The operator is liable only for direct damage caused by intentional or negligent failure to provide the service. Liability for lost profits is excluded as far as permitted by law.",
+          "4.2. The operator is not liable for damage resulting from:"
+        ],
+        "list": [
+          "actions or omissions of the user or third parties,",
+          "force majeure, failures of networks, servers or software,",
+          "suspension or termination of services due to a breach of the terms by the user."
+        ]
+      },
+      {
+        "title": "5. No warranty",
+        "paragraphs": [
+          "5.1. KupPixel is provided “as is”. The operator gives no warranty, including fitness for a particular purpose, availability or error-free operation.",
+          "5.2. The operator does not guarantee the effectiveness of marketing activities or the number of visits generated by purchased pixels."
+        ]
+      },
+      {
+        "title": "6. Right to modify the offer",
+        "paragraphs": [
+          "6.1. The operator may change the service, including functionality, pricing, point rules and promotions.",
+          "6.2. Changes take effect on the date announced on the homepage. Users will be informed at least 7 days in advance unless security requires immediate action.",
+          "6.3. Continuing to use the service after changes take effect means you accept them. If you disagree you may terminate the agreement immediately."
+        ]
+      },
+      {
+        "title": "7. Copyright and user content",
+        "paragraphs": [
+          "7.1. By publishing content you confirm that you hold the rights or have obtained consent to share it.",
+          "7.2. You grant the operator a non-exclusive licence to display and store the materials as required to provide the service.",
+          "7.3. The operator may remove content that violates the law or the terms and may block accounts of repeat offenders."
+        ]
+      },
+      {
+        "title": "8. Complaints",
+        "paragraphs": [
+          "8.1. Complaints about the service can be sent to reklamacje@kuppixel.pl within 30 days of the issue.",
+          "8.2. The complaint must include identification details and a description of the issue. The operator will respond within 14 working days.",
+          "8.3. If more time is needed the operator will inform the user about the delay and provide an estimated response date."
+        ]
+      },
+      {
+        "title": "9. Personal data",
+        "paragraphs": [
+          "9.1. KupPixel Sp. z o.o. is the data controller. Data is processed to provide electronic services and manage user accounts in line with the privacy policy.",
+          "9.2. Users have the right to access, rectify, restrict, transfer or delete their data as allowed by law."
+        ]
+      },
+      {
+        "title": "10. Final provisions",
+        "paragraphs": [
+          "10.1. Polish law applies to matters not covered by the terms, especially the Act on Electronic Services and the Civil Code.",
+          "10.2. Disputes will be resolved by competent courts. Consumers may use out-of-court dispute resolution methods.",
+          "10.3. The terms take effect on the date they are published on the website."
+        ]
+      }
+    ]
+  }
+}

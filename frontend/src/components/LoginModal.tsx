@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useMemo, useState } from "react";
 import { useAuth } from "../useAuth";
 import ResendVerificationForm from "./ResendVerificationForm";
+import { useI18n } from "../lang/I18nProvider";
 
 export default function LoginModal() {
   const { isLoginModalOpen, closeLoginModal, login, loginPrompt } = useAuth();
@@ -8,6 +9,7 @@ export default function LoginModal() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { t } = useI18n();
 
   const resetState = useCallback(() => {
     setEmail("");
@@ -32,13 +34,13 @@ export default function LoginModal() {
         resetState();
       } catch (err) {
         console.error("login error", err);
-        const message = err instanceof Error ? err.message : "Nie udało się zalogować.";
+        const message = err instanceof Error ? err.message : t("auth.errors.login");
         setError(message);
       } finally {
         setIsSubmitting(false);
       }
     },
-    [email, login, password, resetState]
+    [email, login, password, resetState, t]
   );
 
   const showResend = useMemo(() => {
@@ -60,16 +62,14 @@ export default function LoginModal() {
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-semibold text-slate-100">Zaloguj się</h2>
-            <p className="mt-1 text-sm text-slate-400">
-              {loginPrompt || "Podaj dane logowania, aby kontynuować."}
-            </p>
+            <h2 className="text-2xl font-semibold text-slate-100">{t("loginModal.title")}</h2>
+            <p className="mt-1 text-sm text-slate-400">{loginPrompt || t("auth.messages.loginModalDefault")}</p>
           </div>
           <button
             type="button"
             onClick={handleClose}
             className="rounded-full bg-slate-800/80 p-2 text-slate-400 transition hover:text-slate-200"
-            aria-label="Zamknij"
+            aria-label={t("common.actions.close")}
           >
             ×
           </button>
@@ -77,7 +77,7 @@ export default function LoginModal() {
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <label className="block text-sm font-medium text-slate-200">
-            Adres e-mail
+            {t("common.labels.email")}
             <input
               type="email"
               value={email}
@@ -91,7 +91,7 @@ export default function LoginModal() {
           </label>
 
           <label className="block text-sm font-medium text-slate-200">
-            Hasło
+            {t("common.labels.password")}
             <input
               type="password"
               value={password}
@@ -110,7 +110,7 @@ export default function LoginModal() {
           )}
           {showResend && (
             <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-4 text-sm text-blue-100">
-              <p className="mb-3">Nie otrzymałeś wiadomości? Wyślij ponownie link weryfikacyjny.</p>
+              <p className="mb-3">{t("auth.messages.resendPrompt")}</p>
               <ResendVerificationForm initialEmail={email} className="space-y-3" />
             </div>
           )}
@@ -122,14 +122,14 @@ export default function LoginModal() {
               className="rounded-full px-4 py-2 text-sm font-semibold text-slate-300 transition hover:text-slate-100"
               disabled={isSubmitting}
             >
-              Anuluj
+              {t("common.actions.cancel")}
             </button>
             <button
               type="submit"
               className="inline-flex items-center justify-center rounded-full bg-blue-500 px-5 py-2 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-70"
               disabled={isSubmitting}
             >
-              {isSubmitting ? "Logowanie..." : "Zaloguj"}
+              {isSubmitting ? t("loginModal.submitting") : t("loginModal.submit")}
             </button>
           </div>
         </form>

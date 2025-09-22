@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../useAuth";
 import ResendVerificationForm from "./ResendVerificationForm";
+import { useI18n } from "../lang/I18nProvider";
 
 type RegisterModalProps = {
   isOpen: boolean;
@@ -18,6 +19,9 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const { t } = useI18n();
+  const termsTemplate = t("registerModal.terms", { termsLink: "__LINK__" });
+  const [termsPrefix, termsSuffix = ""] = termsTemplate.split("__LINK__");
 
   const resetState = useCallback(() => {
     setEmail("");
@@ -40,7 +44,7 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
       event.preventDefault();
       setError(null);
       if (!acceptedTerms) {
-        setError("Aby utworzyć konto, zaakceptuj regulamin.");
+        setError(t("auth.messages.registerTermsError"));
         return;
       }
       setIsSubmitting(true);
@@ -51,13 +55,13 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
         setSuccessMessage(result.message);
       } catch (err) {
         console.error("register error", err);
-        const message = err instanceof Error ? err.message : "Nie udało się utworzyć konta.";
+        const message = err instanceof Error ? err.message : t("auth.errors.register");
         setError(message);
       } finally {
         setIsSubmitting(false);
       }
     },
-    [acceptedTerms, email, password, register]
+    [acceptedTerms, email, password, register, t]
   );
 
   if (!isOpen) {
@@ -74,20 +78,19 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-2xl font-semibold text-slate-100">
-              {isSuccess ? "Potwierdź adres e-mail" : "Załóż konto"}
+              {isSuccess ? t("registerModal.successTitle") : t("registerModal.title")}
             </h2>
             <p className="mt-1 text-sm text-slate-400">
               {isSuccess
-                ? successMessage ??
-                  "Wysłaliśmy do Ciebie wiadomość z linkiem aktywacyjnym. Kliknij go, aby dokończyć rejestrację."
-                : "Podaj adres e-mail i hasło, aby utworzyć konto i rozpocząć zabawę z tablicą pikseli."}
+                ? successMessage ?? t("auth.messages.registerEmailInfo")
+                : t("auth.messages.registerInfo")}
             </p>
           </div>
           <button
             type="button"
             onClick={handleClose}
             className="rounded-full bg-slate-800/80 p-2 text-slate-400 transition hover:text-slate-200"
-            aria-label="Zamknij"
+            aria-label={t("common.actions.close")}
           >
             ×
           </button>
@@ -96,9 +99,7 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
         {isSuccess ? (
           <div className="mt-6 space-y-6">
             <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-4 text-sm text-blue-100">
-              <p>
-                Nie widzisz wiadomości? Sprawdź folder spam lub poczekaj kilka minut. Możesz też wysłać link ponownie poniżej.
-              </p>
+              <p>{t("auth.messages.registerHelp")}</p>
             </div>
             <ResendVerificationForm initialEmail={email} />
             <div className="flex flex-col gap-3 pt-2 sm:flex-row sm:items-center sm:justify-between">
@@ -112,7 +113,7 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
                   }}
                   className="text-left text-sm font-semibold text-blue-300 transition hover:text-blue-200"
                 >
-                  Przejdź do logowania
+                  {t("common.actions.openLogin")}
                 </button>
               )}
               <button
@@ -120,14 +121,14 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
                 onClick={handleClose}
                 className="self-end rounded-full px-4 py-2 text-sm font-semibold text-slate-300 transition hover:text-slate-100"
               >
-                Zamknij
+                {t("common.actions.close")}
               </button>
             </div>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="mt-6 space-y-4">
             <label className="block text-sm font-medium text-slate-200">
-              Adres e-mail
+              {t("common.labels.email")}
               <input
                 type="email"
                 value={email}
@@ -141,7 +142,7 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
             </label>
 
             <label className="block text-sm font-medium text-slate-200">
-              Hasło
+              {t("common.labels.password")}
               <input
                 type="password"
                 value={password}
@@ -167,11 +168,11 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
                 className="mt-1 h-4 w-4 rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-400"
               />
               <span>
-                Akceptuję {" "}
+                {termsPrefix}
                 <Link to="/terms" className="font-semibold text-blue-300 underline-offset-2 hover:underline">
-                  Regulamin
-                </Link>{" "}
-                serwisu.
+                  {t("registerModal.termsLink")}
+                </Link>
+                {termsSuffix}
               </span>
             </label>
 
@@ -193,7 +194,7 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
                   }}
                   className="text-left text-sm font-semibold text-blue-300 transition hover:text-blue-200"
                 >
-                  Masz już konto? Zaloguj się
+                  {t("registerModal.loginCta")}
                 </button>
               )}
               <div className="flex items-center justify-end gap-3 sm:justify-end">
@@ -203,14 +204,14 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
                   className="rounded-full px-4 py-2 text-sm font-semibold text-slate-300 transition hover:text-slate-100"
                   disabled={isSubmitting}
                 >
-                  Anuluj
+                  {t("common.actions.cancel")}
                 </button>
                 <button
                   type="submit"
                   className="inline-flex items-center justify-center rounded-full bg-blue-500 px-5 py-2 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-70"
                   disabled={isSubmitting || !acceptedTerms}
                 >
-                  {isSubmitting ? "Tworzenie..." : "Zarejestruj się"}
+                  {isSubmitting ? t("registerModal.submitting") : t("registerModal.submit")}
                 </button>
               </div>
             </div>

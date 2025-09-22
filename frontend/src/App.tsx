@@ -161,13 +161,34 @@ function LandingPage() {
         {loading && <div className="text-slate-300">Ładuję siatkę pikseli...</div>}
         {error && <div className="text-rose-400">{error}</div>}
         {data && (
-          <PixelCanvas
-            width={data.width}
-            height={data.height}
-            pixels={data.pixels}
-            onPixelClick={handlePixelClick}
-            onSelectionComplete={handleSelectionComplete}
-          />
+          <>
+            <div className="w-full max-w-3xl rounded-xl border border-slate-600/70 bg-slate-900/70 px-6 py-4 text-sm text-slate-200 shadow-lg">
+              <h2 className="text-base font-semibold text-slate-100">Jak pracować z tablicą:</h2>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-slate-300">
+                <li>
+                  Kliknij pojedynczy piksel, aby przejść do edycji lub otworzyć link reklamowy właściciela.
+                </li>
+                <li>
+                  Przeciągnij z wciśniętym lewym przyciskiem myszy, aby zaznaczyć blok wolnych pikseli do wspólnego zakupu.
+                </li>
+                <li>
+                  Przytrzymaj <kbd className="rounded bg-slate-800 px-1.5 py-0.5 text-xs font-semibold text-slate-100">Ctrl</kbd> lub
+                  <kbd className="ml-1 rounded bg-slate-800 px-1.5 py-0.5 text-xs font-semibold text-slate-100">Shift</kbd> i przeciągaj,
+                  aby płynnie przesuwać widok tablicy.
+                </li>
+                <li>
+                  Przy dużym powiększeniu pojawia się siatka pomocnicza, która ułatwia liczenie i precyzyjne ustawianie pikseli.
+                </li>
+              </ul>
+            </div>
+            <PixelCanvas
+              width={data.width}
+              height={data.height}
+              pixels={data.pixels}
+              onPixelClick={handlePixelClick}
+              onSelectionComplete={handleSelectionComplete}
+            />
+          </>
         )}
         {selectedPixels.length > 1 && (
           <div className="w-full max-w-2xl rounded-xl border border-blue-500/20 bg-blue-500/5 px-4 py-3 text-center text-sm text-blue-100">
@@ -175,8 +196,8 @@ function LandingPage() {
           </div>
         )}
         <p className="max-w-2xl text-center text-sm text-slate-400">
-          Kliknij pojedynczy piksel, aby przejść do strony zakupu lub obejrzeć reklamę. Możesz też przeciągnąć myszą, aby
-          zaznaczyć blok wolnych pikseli i kupić kilka naraz.
+          Wskazówki powyżej pomogą Ci szybko odnaleźć się na tablicy — od pojedynczych kliknięć, przez zaznaczanie obszarów,
+          po płynne przesuwanie i precyzyjną pracę na dużym powiększeniu.
         </p>
       </main>
     </div>

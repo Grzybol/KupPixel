@@ -26,6 +26,7 @@
     "labels": {
       "email": "Email address",
       "password": "Password",
+      "confirmPassword": "Confirm password",
       "pixelColor": "Pixel color",
       "pixelUrl": "Ad URL",
       "activationCode": "Activation code",
@@ -141,7 +142,9 @@
         "request": "Failed to request password reset. Please try again.",
         "confirm": "Failed to reset password. Please try again.",
         "missingToken": "Reset token is missing or invalid.",
-        "passwordRequired": "Enter a new password."
+        "passwordRequired": "Enter a new password.",
+        "passwordConfirmationRequired": "Confirm your new password.",
+        "passwordMismatch": "The passwords do not match."
       }
     }
   },

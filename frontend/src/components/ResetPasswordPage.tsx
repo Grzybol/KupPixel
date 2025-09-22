@@ -9,6 +9,7 @@ export default function ResetPasswordPage() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token") ?? "";
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [status, setStatus] = useState<"idle" | "success" | "error">(token ? "idle" : "error");
   const [message, setMessage] = useState("");
   const [error, setError] = useState(() => (token ? "" : t("auth.passwordReset.errors.missingToken")));
@@ -26,13 +27,25 @@ export default function ResetPasswordPage() {
       setStatus("error");
       return;
     }
+    if (!confirmPassword.trim()) {
+      setError(t("auth.passwordReset.errors.passwordConfirmationRequired"));
+      setStatus("error");
+      return;
+    }
+    if (password.trim() !== confirmPassword.trim()) {
+      setError(t("auth.passwordReset.errors.passwordMismatch"));
+      setStatus("error");
+      return;
+    }
 
     setIsSubmitting(true);
     setStatus("idle");
     setError("");
     setMessage("");
     try {
-      const result = await confirmPasswordReset(token, password.trim());
+      const normalizedPassword = password.trim();
+      const normalizedConfirm = confirmPassword.trim();
+      const result = await confirmPasswordReset(token, normalizedPassword, normalizedConfirm);
       setMessage(result);
       setStatus("success");
     } catch (err) {
@@ -62,6 +75,19 @@ export default function ResetPasswordPage() {
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
+              className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-900/70 px-4 py-3 text-slate-100 shadow-inner focus:border-blue-400 focus:outline-none"
+              required
+              autoComplete="new-password"
+              disabled={isSubmitting}
+            />
+          </label>
+
+          <label className="block text-sm font-medium text-slate-200">
+            {t("common.labels.confirmPassword")}
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
               className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-900/70 px-4 py-3 text-slate-100 shadow-inner focus:border-blue-400 focus:outline-none"
               required
               autoComplete="new-password"

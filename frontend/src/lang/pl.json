@@ -26,9 +26,10 @@
     "labels": {
       "email": "Adres e-mail",
       "password": "Hasło",
-    "pixelColor": "Kolor piksela",
-    "pixelUrl": "Adres URL reklamy",
-    "activationCode": "Kod aktywacyjny",
+      "confirmPassword": "Powtórz hasło",
+      "pixelColor": "Kolor piksela",
+      "pixelUrl": "Adres URL reklamy",
+      "activationCode": "Kod aktywacyjny",
       "balance": "Saldo",
       "pixelCost": "Koszt piksela"
     },
@@ -141,7 +142,9 @@
         "request": "Nie udało się wysłać prośby o reset hasła. Spróbuj ponownie.",
         "confirm": "Nie udało się zresetować hasła. Spróbuj ponownie.",
         "missingToken": "Brak lub nieprawidłowy token resetujący.",
-        "passwordRequired": "Podaj nowe hasło."
+        "passwordRequired": "Podaj nowe hasło.",
+        "passwordConfirmationRequired": "Powtórz nowe hasło.",
+        "passwordMismatch": "Hasła muszą być identyczne."
       }
     }
   },

@@ -1,10 +1,12 @@
 import { FormEvent, useCallback, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../useAuth";
 import ResendVerificationForm from "./ResendVerificationForm";
 import { useI18n } from "../lang/I18nProvider";
 
 export default function LoginModal() {
   const { isLoginModalOpen, closeLoginModal, login, loginPrompt } = useAuth();
+  const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -23,6 +25,13 @@ export default function LoginModal() {
     resetState();
     closeLoginModal();
   }, [closeLoginModal, isSubmitting, resetState]);
+
+  const handleForgotPassword = useCallback(() => {
+    if (isSubmitting) return;
+    resetState();
+    closeLoginModal();
+    navigate("/forgot-password");
+  }, [closeLoginModal, isSubmitting, navigate, resetState]);
 
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
@@ -102,6 +111,17 @@ export default function LoginModal() {
               disabled={isSubmitting}
             />
           </label>
+
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={handleForgotPassword}
+              className="text-sm font-medium text-blue-400 transition hover:text-blue-300"
+              disabled={isSubmitting}
+            >
+              {t("auth.passwordReset.link")}
+            </button>
+          </div>
 
           {error && (
             <p role="alert" className="text-sm text-rose-400">

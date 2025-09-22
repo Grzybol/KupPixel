@@ -43,6 +43,12 @@ func TestLoad_DisableVerificationWithoutSMTP(t *testing.T) {
 	if cfg.Database.Driver != "sqlite" {
 		t.Fatalf("expected sqlite driver, got %q", cfg.Database.Driver)
 	}
+	if cfg.Email.Language != "pl" {
+		t.Fatalf("expected default email language pl, got %q", cfg.Email.Language)
+	}
+	if cfg.PasswordReset.TokenTTLHours != Default().PasswordReset.TokenTTLHours {
+		t.Fatalf("expected default reset ttl, got %d", cfg.PasswordReset.TokenTTLHours)
+	}
 }
 
 func TestLoad_WithValidSMTP(t *testing.T) {
@@ -80,6 +86,12 @@ func TestLoad_WithValidSMTP(t *testing.T) {
 	}
 	if cfg.Database.Driver != "sqlite" {
 		t.Fatalf("expected sqlite driver by default, got %q", cfg.Database.Driver)
+	}
+	if cfg.Email.Language != "pl" {
+		t.Fatalf("expected default email language pl, got %q", cfg.Email.Language)
+	}
+	if cfg.PasswordReset.TokenTTLHours != Default().PasswordReset.TokenTTLHours {
+		t.Fatalf("expected default reset ttl, got %d", cfg.PasswordReset.TokenTTLHours)
 	}
 }
 
@@ -152,5 +164,11 @@ func TestWriteFile_DefaultConfig(t *testing.T) {
 	}
 	if cfg.Database.Driver != "sqlite" {
 		t.Fatalf("expected sqlite driver, got %q", cfg.Database.Driver)
+	}
+	if cfg.Email.Language != "pl" {
+		t.Fatalf("expected default email language pl, got %q", cfg.Email.Language)
+	}
+	if cfg.PasswordReset.TokenTTLHours != Default().PasswordReset.TokenTTLHours {
+		t.Fatalf("expected default reset ttl, got %d", cfg.PasswordReset.TokenTTLHours)
 	}
 }

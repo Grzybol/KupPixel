@@ -18,6 +18,19 @@ type Config struct {
 	DisableVerificationEmail bool              `json:"disableVerificationEmail"`
 	PixelCostPoints          int               `json:"pixelCostPoints"`
 	Database                 *DatabaseConfig   `json:"database"`
+	Email                    EmailConfig       `json:"email"`
+	PasswordReset            PasswordReset     `json:"passwordReset"`
+}
+
+// EmailConfig controls localisation of transactional emails sent by the backend.
+type EmailConfig struct {
+	Language string `json:"language"`
+}
+
+// PasswordReset holds configuration for password reset tokens and links.
+type PasswordReset struct {
+	TokenTTLHours int    `json:"tokenTtlHours"`
+	BaseURL       string `json:"baseUrl"`
 }
 
 // DatabaseConfig encapsulates storage backend configuration.
@@ -66,6 +79,8 @@ func Default() *Config {
 		DisableVerificationEmail: false,
 		PixelCostPoints:          10,
 		Database:                 defaultDatabaseConfig(),
+		Email:                    EmailConfig{Language: "pl"},
+		PasswordReset:            PasswordReset{TokenTTLHours: 24},
 	}
 }
 
@@ -123,6 +138,16 @@ func Load(path string) (*Config, error) {
 	if cfg.PixelCostPoints <= 0 {
 		cfg.PixelCostPoints = Default().PixelCostPoints
 	}
+
+	cfg.Email.Language = strings.ToLower(strings.TrimSpace(cfg.Email.Language))
+	if cfg.Email.Language == "" {
+		cfg.Email.Language = Default().Email.Language
+	}
+
+	if cfg.PasswordReset.TokenTTLHours <= 0 {
+		cfg.PasswordReset.TokenTTLHours = Default().PasswordReset.TokenTTLHours
+	}
+	cfg.PasswordReset.BaseURL = strings.TrimSpace(cfg.PasswordReset.BaseURL)
 
 	if cfg.Database == nil {
 		cfg.Database = defaultDatabaseConfig()

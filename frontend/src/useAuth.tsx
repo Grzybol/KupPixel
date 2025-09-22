@@ -42,6 +42,8 @@ type AuthContextValue = {
   isLoading: boolean;
   login: (credentials: LoginCredentials) => Promise<void>;
   register: (credentials: RegisterCredentials) => Promise<RegisterResult>;
+  requestPasswordReset: (email: string) => Promise<string>;
+  confirmPasswordReset: (token: string, password: string) => Promise<string>;
   logout: () => Promise<void>;
   refresh: () => Promise<AuthUser | null>;
   ensureAuthenticated: (options?: OpenOptions) => Promise<boolean>;
@@ -235,6 +237,58 @@ export function AuthProvider({ children }: PropsWithChildren) {
     [t]
   );
 
+  const requestPasswordReset = useCallback(
+    async (email: string): Promise<string> => {
+      const response = await fetch("/api/password-reset/request", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message =
+          (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).error === "string"
+            ? ((payload as Record<string, unknown>).error as string)
+            : null) || t("auth.passwordReset.errors.request");
+        throw new Error(message);
+      }
+      const message =
+        payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).message === "string"
+          ? ((payload as Record<string, unknown>).message as string)
+          : t("auth.passwordReset.success");
+      return message;
+    },
+    [t]
+  );
+
+  const confirmPasswordReset = useCallback(
+    async (token: string, password: string): Promise<string> => {
+      const response = await fetch("/api/password-reset/confirm", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ token, password }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message =
+          (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).error === "string"
+            ? ((payload as Record<string, unknown>).error as string)
+            : null) || t("auth.passwordReset.errors.confirm");
+        throw new Error(message);
+      }
+      const message =
+        payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).message === "string"
+          ? ((payload as Record<string, unknown>).message as string)
+          : t("auth.passwordReset.confirmSuccess");
+      return message;
+    },
+    [t]
+  );
+
   const logout = useCallback(async () => {
     try {
       await fetch("/api/logout", {
@@ -262,6 +316,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
       isLoading,
       login,
       register,
+      requestPasswordReset,
+      confirmPasswordReset,
       logout,
       refresh,
       ensureAuthenticated,
@@ -279,6 +335,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
       login,
       loginPrompt,
       logout,
+      requestPasswordReset,
+      confirmPasswordReset,
       openLoginModal,
       refresh,
       user,

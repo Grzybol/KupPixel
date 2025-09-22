@@ -9,6 +9,8 @@ import ActivationCodeModal from "./components/ActivationCodeModal";
 import TermsFooter from "./components/TermsFooter";
 import NavigationBar from "./components/NavigationBar";
 import TermsPage from "./components/TermsPage";
+import ForgotPasswordPage from "./components/ForgotPasswordPage";
+import ResetPasswordPage from "./components/ResetPasswordPage";
 import { useAuth } from "./useAuth";
 import { useI18n } from "./lang/I18nProvider";
 
@@ -694,6 +696,22 @@ export default function App() {
           element={
             <PageLayout onOpenRegister={handleOpenRegister}>
               <VerifyAccountPage />
+            </PageLayout>
+          }
+        />
+        <Route
+          path="/forgot-password"
+          element={
+            <PageLayout onOpenRegister={handleOpenRegister}>
+              <ForgotPasswordPage />
+            </PageLayout>
+          }
+        />
+        <Route
+          path="/reset-password"
+          element={
+            <PageLayout onOpenRegister={handleOpenRegister}>
+              <ResetPasswordPage />
             </PageLayout>
           }
         />

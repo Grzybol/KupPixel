@@ -126,6 +126,23 @@
       "verifyResendDescription": "Enter your email address to receive a new verification token.",
       "verifyErrorTitle": "Could not verify the account",
       "verifyReady": "All set!"
+    },
+    "passwordReset": {
+      "title": "Reset your password",
+      "description": "Enter your email address to receive reset instructions.",
+      "submit": "Send reset link",
+      "success": "If the account exists, we sent reset instructions to your email.",
+      "link": "Forgot password?",
+      "confirmTitle": "Set a new password",
+      "confirmDescription": "Choose a new password for your account.",
+      "confirmSubmit": "Update password",
+      "confirmSuccess": "Password updated. You can sign in now.",
+      "errors": {
+        "request": "Failed to request password reset. Please try again.",
+        "confirm": "Failed to reset password. Please try again.",
+        "missingToken": "Reset token is missing or invalid.",
+        "passwordRequired": "Enter a new password."
+      }
     }
   },
   "landing": {

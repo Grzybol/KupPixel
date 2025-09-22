@@ -29,10 +29,15 @@ type updatePixelResponse struct {
 	User struct {
 		Points int64 `json:"points"`
 	} `json:"user"`
-	Pixel struct {
-		ID     int    `json:"id"`
-		Status string `json:"status"`
-	} `json:"pixel"`
+	Results []struct {
+		ID    int    `json:"id"`
+		Error string `json:"error"`
+		Pixel *struct {
+			ID     int    `json:"id"`
+			Status string `json:"status"`
+		} `json:"pixel"`
+	} `json:"results"`
+	Error string `json:"error"`
 }
 
 type storeFactory struct {
@@ -88,8 +93,10 @@ func prepareStore(t *testing.T, store storage.Store) {
 	if err := store.EnsureSchema(context.Background()); err != nil {
 		t.Fatalf("ensure schema: %v", err)
 	}
-	if err := store.InsertPixel(context.Background(), storage.Pixel{ID: 1, Status: "free"}); err != nil {
-		t.Fatalf("insert pixel: %v", err)
+	for _, id := range []int{1, 2, 3} {
+		if err := store.InsertPixel(context.Background(), storage.Pixel{ID: id, Status: "free"}); err != nil {
+			t.Fatalf("insert pixel %d: %v", id, err)
+		}
 	}
 }
 
@@ -179,7 +186,7 @@ func TestHandleUpdatePixelRequiresPoints(t *testing.T) {
 			t.Fatalf("create session: %v", err)
 		}
 
-		purchaseBody := bytes.NewBufferString(`{"id":1,"status":"taken","color":"#ffffff","url":"https://example.com"}`)
+		purchaseBody := bytes.NewBufferString(`{"pixels":[{"id":1,"status":"taken","color":"#ffffff","url":"https://example.com"}]}`)
 		req := httptest.NewRequest(http.MethodPost, "/api/pixels", purchaseBody)
 		req.Header.Set("Content-Type", "application/json")
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionID})
@@ -192,6 +199,17 @@ func TestHandleUpdatePixelRequiresPoints(t *testing.T) {
 			t.Fatalf("expected status 403 for insufficient points, got %d", w.Code)
 		}
 		t.Log("insufficient points handled")
+
+		var insufficientResp updatePixelResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &insufficientResp); err != nil {
+			t.Fatalf("unmarshal insufficient response: %v", err)
+		}
+		if len(insufficientResp.Results) != 1 {
+			t.Fatalf("expected 1 result, got %d", len(insufficientResp.Results))
+		}
+		if insufficientResp.Results[0].Error == "" {
+			t.Fatalf("expected error message for insufficient points")
+		}
 
 		if err := store.CreateActivationCode(context.Background(), "WXYZ-1234-5678-90AB", 40); err != nil {
 			t.Fatalf("create activation code: %v", err)
@@ -209,7 +227,7 @@ func TestHandleUpdatePixelRequiresPoints(t *testing.T) {
 		}
 		t.Log("activation code redeemed")
 
-		purchaseBody = bytes.NewBufferString(`{"id":1,"status":"taken","color":"#0000ff","url":"https://example.com"}`)
+		purchaseBody = bytes.NewBufferString(`{"pixels":[{"id":1,"status":"taken","color":"#0000ff","url":"https://example.com"}]}`)
 		req = httptest.NewRequest(http.MethodPost, "/api/pixels", purchaseBody)
 		req.Header.Set("Content-Type", "application/json")
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionID})
@@ -228,14 +246,86 @@ func TestHandleUpdatePixelRequiresPoints(t *testing.T) {
 			t.Fatalf("unmarshal response: %v", err)
 		}
 
-		if resp.Pixel.ID != 1 {
-			t.Fatalf("expected pixel id 1, got %d", resp.Pixel.ID)
+		if len(resp.Results) != 1 {
+			t.Fatalf("expected 1 result, got %d", len(resp.Results))
 		}
-		if resp.Pixel.Status != "taken" {
-			t.Fatalf("expected pixel status taken, got %s", resp.Pixel.Status)
+		if resp.Results[0].Pixel == nil {
+			t.Fatalf("expected pixel payload")
+		}
+		if resp.Results[0].Pixel.ID != 1 {
+			t.Fatalf("expected pixel id 1, got %d", resp.Results[0].Pixel.ID)
+		}
+		if resp.Results[0].Pixel.Status != "taken" {
+			t.Fatalf("expected pixel status taken, got %s", resp.Results[0].Pixel.Status)
 		}
 		if resp.User.Points != 30 {
 			t.Fatalf("expected remaining points 30, got %d", resp.User.Points)
+		}
+	})
+}
+
+func TestHandleUpdatePixelMultiplePurchase(t *testing.T) {
+	runStoreTests(t, func(t *testing.T, server *Server, store storage.Store) {
+		user, err := store.CreateUser(context.Background(), "buyer@example.com", "hash")
+		if err != nil {
+			t.Fatalf("create user: %v", err)
+		}
+
+		sessionID, err := server.sessions.Create(user.ID)
+		if err != nil {
+			t.Fatalf("create session: %v", err)
+		}
+
+		if err := store.CreateActivationCode(context.Background(), "MULT-TEST-CODE-0001", 60); err != nil {
+			t.Fatalf("create activation code: %v", err)
+		}
+
+		redeemBody := bytes.NewBufferString(`{"code":"MULT-TEST-CODE-0001"}`)
+		redeemReq := httptest.NewRequest(http.MethodPost, "/api/activation-codes/redeem", redeemBody)
+		redeemReq.Header.Set("Content-Type", "application/json")
+		redeemReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionID})
+		redeemW := httptest.NewRecorder()
+		redeemCtx := &gin.Context{Writer: redeemW, Request: redeemReq}
+		server.handleRedeemActivationCode(redeemCtx)
+		if redeemW.Code != http.StatusOK {
+			t.Fatalf("expected redeem status 200, got %d", redeemW.Code)
+		}
+
+		purchaseBody := bytes.NewBufferString(`{"pixels":[{"id":1,"status":"taken","color":"#123456","url":"https://example.com/a"},{"id":2,"status":"taken","color":"#abcdef","url":"https://example.com/b"}]}`)
+		req := httptest.NewRequest(http.MethodPost, "/api/pixels", purchaseBody)
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionID})
+		w := httptest.NewRecorder()
+		c := &gin.Context{Writer: w, Request: req}
+
+		server.handleUpdatePixel(c)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", w.Code)
+		}
+
+		var resp updatePixelResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal response: %v", err)
+		}
+
+		if len(resp.Results) != 2 {
+			t.Fatalf("expected 2 results, got %d", len(resp.Results))
+		}
+		for _, result := range resp.Results {
+			if result.Error != "" {
+				t.Fatalf("unexpected error for pixel %d: %s", result.ID, result.Error)
+			}
+			if result.Pixel == nil {
+				t.Fatalf("expected pixel payload for id %d", result.ID)
+			}
+			if result.Pixel.Status != "taken" {
+				t.Fatalf("expected pixel status taken, got %s", result.Pixel.Status)
+			}
+		}
+
+		if resp.User.Points != 40 {
+			t.Fatalf("expected remaining points 40, got %d", resp.User.Points)
 		}
 	})
 }

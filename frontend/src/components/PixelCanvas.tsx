@@ -173,6 +173,31 @@ export default function PixelCanvas({
       canvas.width,
       canvas.height
     );
+    const pixelWidth = visibleWidth === 0 ? Infinity : canvas.width / visibleWidth;
+    const pixelHeight = visibleHeight === 0 ? Infinity : canvas.height / visibleHeight;
+    const pixelScreenSize = Math.min(pixelWidth, pixelHeight);
+    if (pixelScreenSize >= 4) {
+      ctx.save();
+      ctx.imageSmoothingEnabled = false;
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(148, 163, 184, 0.35)";
+      ctx.translate(0.5, 0.5);
+      ctx.beginPath();
+      const maxBoardX = offsetX + visibleWidth;
+      for (let x = Math.floor(offsetX) + 1; x < maxBoardX; x++) {
+        const canvasX = (x - offsetX) * pixelWidth;
+        ctx.moveTo(canvasX, 0);
+        ctx.lineTo(canvasX, canvas.height);
+      }
+      const maxBoardY = offsetY + visibleHeight;
+      for (let y = Math.floor(offsetY) + 1; y < maxBoardY; y++) {
+        const canvasY = (y - offsetY) * pixelHeight;
+        ctx.moveTo(0, canvasY);
+        ctx.lineTo(canvas.width, canvasY);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
   }, [offsetX, offsetY, visibleHeight, visibleWidth, data]);
 
   const getBoardCoordinates = useCallback(
@@ -236,7 +261,7 @@ export default function PixelCanvas({
 
   const handleMouseDown = (event: MouseEvent<HTMLCanvasElement>) => {
     if (event.button !== 0) return;
-    if (event.ctrlKey) {
+    if (event.ctrlKey || event.shiftKey) {
       isPanningRef.current = true;
       lastPanPositionRef.current = { x: event.clientX, y: event.clientY };
       preventClickRef.current = false;
@@ -254,6 +279,12 @@ export default function PixelCanvas({
   };
 
   const handleMouseMove = (event: MouseEvent<HTMLCanvasElement>) => {
+    if ((event.buttons & 1) === 1 && (event.ctrlKey || event.shiftKey) && !isPanningRef.current) {
+      isPanningRef.current = true;
+      lastPanPositionRef.current = { x: event.clientX, y: event.clientY };
+      preventClickRef.current = true;
+      resetSelection();
+    }
     if (isPanningRef.current) {
       const canvas = canvasRef.current;
       const last = lastPanPositionRef.current;
@@ -326,7 +357,7 @@ export default function PixelCanvas({
 
   const handleMouseUp = (event: MouseEvent<HTMLCanvasElement>) => {
     if (event.button !== 0) return;
-    if (isPanningRef.current) {
+    if (isPanningRef.current || event.ctrlKey || event.shiftKey) {
       isPanningRef.current = false;
       lastPanPositionRef.current = null;
       preventClickRef.current = true;
@@ -337,7 +368,7 @@ export default function PixelCanvas({
   };
 
   const handleMouseLeave = () => {
-    if (isDraggingRef.current) {
+    if (isDraggingRef.current || isPanningRef.current) {
       preventClickRef.current = true;
     }
     isPanningRef.current = false;

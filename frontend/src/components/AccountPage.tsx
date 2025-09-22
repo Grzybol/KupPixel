@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth, type AuthUser } from "../useAuth";
+import { useI18n } from "../lang/I18nProvider";
 
 type AccountPixel = {
   id: number;
@@ -85,6 +86,7 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [accountPixelCost, setAccountPixelCost] = useState<number | null>(null);
+  const { t } = useI18n();
 
   useEffect(() => {
     if (user) {
@@ -97,10 +99,10 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
       return;
     }
     if (!user) {
-      void openLoginModal({ message: "Zaloguj się, aby zobaczyć dane swojego konta." });
+      void openLoginModal({ message: t("auth.errors.loginToView") });
       navigate("/");
     }
-  }, [isAuthLoading, navigate, openLoginModal, user]);
+  }, [isAuthLoading, navigate, openLoginModal, t, user]);
 
   const loadAccount = useCallback(async () => {
     setIsLoading(true);
@@ -112,13 +114,13 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
         credentials: "include",
       });
       if (response.status === 401) {
-        void openLoginModal({ message: "Zaloguj się ponownie, aby zobaczyć swoje piksele." });
+        void openLoginModal({ message: t("auth.errors.loginToViewPixels") });
         navigate("/");
         return;
       }
       if (!response.ok) {
         const message = await response.text().catch(() => "");
-        throw new Error(message || `Nie udało się pobrać danych konta (${response.status}).`);
+        throw new Error(message || t("auth.errors.account"));
       }
       const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
       let parsedPixels: AccountPixel[] = [];
@@ -141,13 +143,12 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
       setPixels(parsedPixels);
     } catch (accountError) {
       console.error(accountError);
-      const message =
-        accountError instanceof Error ? accountError.message : "Wystąpił błąd podczas pobierania danych konta.";
+      const message = accountError instanceof Error ? accountError.message : t("auth.errors.account");
       setError(message);
     } finally {
       setIsLoading(false);
     }
-  }, [navigate, openLoginModal, refresh, user]);
+  }, [navigate, openLoginModal, refresh, t, user]);
 
   useEffect(() => {
     if (!user) {
@@ -183,6 +184,9 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
     }
     return null;
   }, [accountPixelCost, pixelCostPoints]);
+
+  const pointsShort = t("common.units.pointsShort");
+  const formatPoints = useCallback((value: number) => t("common.units.points", { count: value }), [t]);
 
   const handleOpenActivation = useCallback(() => {
     if (onOpenActivationCode) {
@@ -223,7 +227,7 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
     }
     const trimmed = editValue.trim();
     if (!trimmed) {
-      setActionError("Podaj poprawny adres URL.");
+      setActionError(t("auth.errors.missingUrl"));
       return;
     }
     let normalizedUrl = trimmed;
@@ -232,11 +236,11 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
       normalizedUrl = parsed.toString();
     } catch (urlError) {
       console.error(urlError);
-      setActionError("Adres URL musi zawierać poprawny schemat (np. https://).");
+      setActionError(t("auth.errors.invalidUrl"));
       return;
     }
     if (!pixel.color) {
-      setActionError("Ten piksel nie ma przypisanego koloru i nie może zostać zaktualizowany.");
+      setActionError(t("auth.errors.missingColor"));
       return;
     }
     setIsSaving(true);
@@ -257,13 +261,13 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
         }),
       });
       if (response.status === 401) {
-        void openLoginModal({ message: "Zaloguj się, aby zaktualizować adres reklamy." });
+        void openLoginModal({ message: t("auth.errors.loginToUpdate") });
         navigate("/");
         return;
       }
       if (!response.ok) {
         const message = await response.text().catch(() => "");
-        throw new Error(message || `Nie udało się zaktualizować piksela (${response.status}).`);
+        throw new Error(message || t("auth.errors.savePixel"));
       }
       const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
       const payloadPixel =
@@ -285,45 +289,45 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
       setPixels((prev) => prev.map((item) => (item.id === pixel.id ? updatedPixel : item)));
       setEditingId(null);
       setEditValue("");
-      setActionMessage("Adres reklamy został zaktualizowany.");
+      setActionMessage(t("auth.messages.accountUpdated"));
     } catch (saveError) {
       console.error(saveError);
-      const message = saveError instanceof Error ? saveError.message : "Nie udało się zapisać zmian.";
+      const message = saveError instanceof Error ? saveError.message : t("auth.errors.savePixel");
       setActionError(message);
     } finally {
       setIsSaving(false);
     }
-  }, [editValue, editingId, navigate, openLoginModal, pixels]);
+  }, [editValue, editingId, navigate, openLoginModal, pixels, t]);
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-8 px-4 py-12 text-slate-200">
       <header className="space-y-2 text-center">
-        <h1 className="text-3xl font-semibold text-blue-400">Twoje konto</h1>
-        <p className="text-sm text-slate-400">Zarządzaj zakupionymi pikselami i aktualizuj adresy reklam.</p>
+        <h1 className="text-3xl font-semibold text-blue-400">{t("account.title")}</h1>
+        <p className="text-sm text-slate-400">{t("auth.messages.accountIntro")}</p>
         {currentUserEmail && (
-          <p className="text-sm text-slate-300">
-            Zalogowano jako <span className="font-semibold text-white">{currentUserEmail}</span>
-          </p>
+          <p className="text-sm text-slate-300">{t("auth.messages.accountLoggedInAs", { email: currentUserEmail })}</p>
         )}
       </header>
 
       <section className="grid gap-4 rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl sm:grid-cols-2 lg:grid-cols-3">
-          <div className="rounded-2xl border border-slate-800/60 bg-slate-950/60 p-4">
-            <p className="text-sm font-semibold text-slate-100">Saldo punktów</p>
-            <p className="mt-2 text-2xl font-bold text-emerald-400">{pointsBalance} pkt</p>
-            <p className="mt-1 text-xs text-slate-400">Aktywuj kody, aby zdobyć więcej punktów i zajmować kolejne piksele.</p>
+        <div className="rounded-2xl border border-slate-800/60 bg-slate-950/60 p-4">
+            <p className="text-sm font-semibold text-slate-100">{t("account.saldoTitle")}</p>
+            <p className="mt-2 text-2xl font-bold text-emerald-400">{formatPoints(pointsBalance)}</p>
+            <p className="mt-1 text-xs text-slate-400">{t("auth.messages.accountBalanceHint")}</p>
           </div>
           <div className="rounded-2xl border border-slate-800/60 bg-slate-950/60 p-4">
-            <p className="text-sm font-semibold text-slate-100">Koszt jednego piksela</p>
+            <p className="text-sm font-semibold text-slate-100">{t("account.pixelCostTitle")}</p>
             <p className="mt-2 text-2xl font-bold text-slate-200">
-              {typeof effectivePixelCost === "number" && effectivePixelCost > 0 ? `${effectivePixelCost} pkt` : "Brak danych"}
+              {typeof effectivePixelCost === "number" && effectivePixelCost > 0
+                ? formatPoints(effectivePixelCost)
+                : t("account.noData")}
             </p>
-            <p className="mt-1 text-xs text-slate-400">Do zajęcia nowego piksela potrzebujesz co najmniej tylu punktów.</p>
+            <p className="mt-1 text-xs text-slate-400">{t("auth.messages.accountPixelCostHint")}</p>
           </div>
           <div className="flex flex-col justify-between gap-3 rounded-2xl border border-slate-800/60 bg-slate-950/60 p-4">
             <div>
-              <p className="text-sm font-semibold text-slate-100">Zarządzaj saldem</p>
-              <p className="mt-1 text-xs text-slate-400">Aktywuj kod lub odśwież dane, aby zobaczyć aktualne punkty.</p>
+              <p className="text-sm font-semibold text-slate-100">{t("account.manageTitle")}</p>
+              <p className="mt-1 text-xs text-slate-400">{t("auth.messages.accountManageHint")}</p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               {onOpenActivationCode && (
@@ -332,7 +336,7 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
                   onClick={handleOpenActivation}
                   className="flex-1 rounded-full bg-emerald-500/80 px-4 py-2 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400"
                 >
-                  Aktywuj kod
+                  {t("common.actions.activateCode")}
                 </button>
               )}
               <button
@@ -340,7 +344,7 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
                 onClick={handleRefreshAccount}
                 className="flex-1 rounded-full bg-slate-800/80 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-700"
               >
-                Odśwież dane
+                {t("common.actions.refresh")}
               </button>
             </div>
           </div>
@@ -348,13 +352,13 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
 
       <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-xl">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-xl font-semibold text-slate-100">Wykupione piksele</h2>
+            <h2 className="text-xl font-semibold text-slate-100">{t("auth.messages.accountPixels")}</h2>
             <Link to="/" className="text-sm font-semibold text-blue-400 hover:text-blue-300">
-              ← Wróć na tablicę
+              ← {t("buy.return")}
             </Link>
           </div>
 
-          {isLoading && <p className="mt-6 text-sm text-slate-400">Ładuję dane konta...</p>}
+          {isLoading && <p className="mt-6 text-sm text-slate-400">{t("auth.messages.accountLoading")}</p>}
           {error && (
             <p className="mt-6 rounded-xl border border-rose-500/40 bg-rose-500/10 p-4 text-sm text-rose-300" role="alert">
               {error}
@@ -375,18 +379,18 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
               )}
 
               {pixels.length === 0 ? (
-                <p className="text-sm text-slate-400">Nie masz jeszcze żadnych wykupionych pikseli.</p>
+                <p className="text-sm text-slate-400">{t("auth.messages.accountNoPixels")}</p>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-slate-800 text-left text-sm">
                     <thead className="bg-slate-900/60 text-xs uppercase tracking-wide text-slate-400">
                       <tr>
-                        <th className="px-4 py-3 font-semibold">ID</th>
-                        <th className="px-4 py-3 font-semibold">Pozycja</th>
-                        <th className="px-4 py-3 font-semibold">Kolor</th>
-                        <th className="px-4 py-3 font-semibold">Adres URL</th>
-                        <th className="px-4 py-3 font-semibold">Ostatnia aktualizacja</th>
-                        <th className="px-4 py-3 font-semibold text-right">Akcje</th>
+                        <th className="px-4 py-3 font-semibold">{t("account.table.id")}</th>
+                        <th className="px-4 py-3 font-semibold">{t("account.table.position")}</th>
+                        <th className="px-4 py-3 font-semibold">{t("account.table.color")}</th>
+                        <th className="px-4 py-3 font-semibold">{t("account.table.url")}</th>
+                        <th className="px-4 py-3 font-semibold">{t("account.table.updatedAt")}</th>
+                        <th className="px-4 py-3 font-semibold text-right">{t("account.table.actions")}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800 text-slate-200">
@@ -397,7 +401,7 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
                           <tr key={pixel.id} className="bg-slate-900/40">
                             <td className="whitespace-nowrap px-4 py-3 font-mono text-sm">#{pixel.id}</td>
                             <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-400">
-                              x: {position.x}, y: {position.y}
+                              {t("account.table.coordinates", { x: position.x, y: position.y })}
                             </td>
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-3">
@@ -416,7 +420,7 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
                                   value={editValue}
                                   onChange={(event) => setEditValue(event.target.value)}
                                   className="w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-xs text-slate-200 focus:border-blue-500 focus:outline-none"
-                                  placeholder="https://twoja-domena.pl"
+                                  placeholder={t("common.placeholders.pixelUrl")}
                                 />
                               ) : (
                                 <a
@@ -425,7 +429,7 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
                                   rel="noopener noreferrer"
                                   className="break-all text-xs text-blue-400 hover:text-blue-300"
                                 >
-                                  {pixel.url || "Brak"}
+                                  {pixel.url || t("account.table.noUrl")}
                                 </a>
                               )}
                             </td>
@@ -441,7 +445,7 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
                                     disabled={isSaving}
                                     className="rounded-full bg-emerald-500/80 px-4 py-2 text-xs font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
                                   >
-                                    Zapisz
+                                    {t("common.actions.save")}
                                   </button>
                                   <button
                                     type="button"
@@ -449,7 +453,7 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
                                     disabled={isSaving}
                                     className="rounded-full bg-slate-800/70 px-4 py-2 text-xs font-semibold text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
                                   >
-                                    Anuluj
+                                    {t("common.actions.cancel")}
                                   </button>
                                 </div>
                               ) : (
@@ -458,7 +462,7 @@ export default function AccountPage({ onOpenActivationCode }: AccountPageProps =
                                   onClick={() => handleStartEdit(pixel)}
                                   className="rounded-full bg-slate-800/70 px-4 py-2 text-xs font-semibold text-slate-200 transition hover:bg-slate-700"
                                 >
-                                  Zmień URL
+                                  {t("common.actions.editUrl")}
                                 </button>
                               )}
                             </td>

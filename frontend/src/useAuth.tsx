@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useI18n } from "./lang/I18nProvider";
 
 export type AuthUser = {
   id?: number;
@@ -87,6 +88,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [loginPrompt, setLoginPrompt] = useState<string | null>(null);
   const [pixelCostPoints, setPixelCostPoints] = useState<number | null>(null);
   const loginResolverRef = useRef<((result: boolean) => void) | null>(null);
+  const { t } = useI18n();
 
   const closeModal = useCallback(() => {
     setIsLoginModalOpen(false);
@@ -109,7 +111,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
           return null;
         }
         const message = await response.text().catch(() => "");
-        throw new Error(message || `Nie udało się odświeżyć sesji (${response.status})`);
+        throw new Error(message || t("auth.errors.refresh", { status: response.status }));
       }
       const data = await response.json().catch(() => null);
       const parsed = parseUser(data);
@@ -125,7 +127,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [t]);
 
   const openLoginModal = useCallback(
     (options?: OpenOptions) => {
@@ -179,12 +181,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
         const message =
           (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).error === "string"
             ? ((payload as Record<string, unknown>).error as string)
-            : null) || "Nie udało się zalogować. Spróbuj ponownie.";
+            : null) || t("auth.errors.login");
         throw new Error(message);
       }
       const parsed = parseUser(payload);
       if (!parsed) {
-        throw new Error("Nie udało się odczytać informacji o koncie.");
+        throw new Error(t("auth.errors.parseUser"));
       }
       setUser(parsed);
       const cost = extractPixelCostPoints(payload);
@@ -198,7 +200,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         loginResolverRef.current = null;
       }
     },
-    []
+    [t]
   );
 
   const register = useCallback(
@@ -216,21 +218,21 @@ export function AuthProvider({ children }: PropsWithChildren) {
         const message =
           (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).error === "string"
             ? ((payload as Record<string, unknown>).error as string)
-            : null) || "Nie udało się utworzyć konta. Spróbuj ponownie.";
+            : null) || t("auth.errors.register");
         throw new Error(message);
       }
 
       const message =
         payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).message === "string"
           ? ((payload as Record<string, unknown>).message as string)
-          : "Konto zostało utworzone. Sprawdź skrzynkę e-mail.";
+          : t("auth.messages.registerSuccess");
       if (loginResolverRef.current) {
         loginResolverRef.current(false);
         loginResolverRef.current = null;
       }
       return { message };
     },
-    []
+    [t]
   );
 
   const logout = useCallback(async () => {

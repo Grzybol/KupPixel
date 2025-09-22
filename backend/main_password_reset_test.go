@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -34,6 +35,10 @@ func TestPasswordResetFlow(t *testing.T) {
 	user, err := store.CreateUser(context.Background(), "user@example.com", string(hash))
 	if err != nil {
 		t.Fatalf("create user: %v", err)
+	}
+
+	if err := store.MarkUserVerified(context.Background(), user.ID); err != nil {
+		t.Fatalf("mark user verified: %v", err)
 	}
 
 	mailer := &fakeMailer{}
@@ -83,7 +88,7 @@ func TestPasswordResetFlow(t *testing.T) {
 		t.Fatalf("expected token to belong to user %d, got %d", user.ID, record.UserID)
 	}
 
-	confirmBody := bytes.NewBufferString(`{"token":"` + token + `","password":"new-secret"}`)
+	confirmBody := bytes.NewBufferString(fmt.Sprintf(`{"token":"%s","password":"new-secret","confirm_password":"new-secret"}`, token))
 	confirmReq := httptest.NewRequest(http.MethodPost, "/api/password-reset/confirm", confirmBody)
 	confirmReq.Header.Set("Content-Type", "application/json")
 	confirmW := httptest.NewRecorder()
@@ -93,6 +98,30 @@ func TestPasswordResetFlow(t *testing.T) {
 
 	if confirmW.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", confirmW.Code)
+	}
+
+	loginBody := bytes.NewBufferString(`{"email":"user@example.com","password":"new-secret"}`)
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/login", loginBody)
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginW := httptest.NewRecorder()
+	loginCtx := &gin.Context{Writer: loginW, Request: loginReq}
+
+	server.handleLogin(loginCtx)
+
+	if loginW.Code != http.StatusOK {
+		t.Fatalf("expected successful login with new password, got %d", loginW.Code)
+	}
+
+	oldLoginBody := bytes.NewBufferString(`{"email":"user@example.com","password":"initial"}`)
+	oldLoginReq := httptest.NewRequest(http.MethodPost, "/api/login", oldLoginBody)
+	oldLoginReq.Header.Set("Content-Type", "application/json")
+	oldLoginW := httptest.NewRecorder()
+	oldLoginCtx := &gin.Context{Writer: oldLoginW, Request: oldLoginReq}
+
+	server.handleLogin(oldLoginCtx)
+
+	if oldLoginW.Code != http.StatusUnauthorized {
+		t.Fatalf("expected login with old password to be rejected, got %d", oldLoginW.Code)
 	}
 
 	updated, err := store.GetUserByEmail(context.Background(), "user@example.com")

@@ -43,7 +43,7 @@ type AuthContextValue = {
   login: (credentials: LoginCredentials) => Promise<void>;
   register: (credentials: RegisterCredentials) => Promise<RegisterResult>;
   requestPasswordReset: (email: string) => Promise<string>;
-  confirmPasswordReset: (token: string, password: string) => Promise<string>;
+  confirmPasswordReset: (token: string, password: string, confirmPassword: string) => Promise<string>;
   logout: () => Promise<void>;
   refresh: () => Promise<AuthUser | null>;
   ensureAuthenticated: (options?: OpenOptions) => Promise<boolean>;
@@ -264,13 +264,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
   );
 
   const confirmPasswordReset = useCallback(
-    async (token: string, password: string): Promise<string> => {
+    async (token: string, password: string, confirmPassword: string): Promise<string> => {
       const response = await fetch("/api/password-reset/confirm", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ token, password }),
+        body: JSON.stringify({ token, password, confirm_password: confirmPassword }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {

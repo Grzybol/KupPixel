@@ -118,8 +118,9 @@ type passwordResetRequest struct {
 }
 
 type passwordResetConfirmRequest struct {
-	Token    string `json:"token"`
-	Password string `json:"password"`
+	Token           string `json:"token"`
+	Password        string `json:"password"`
+	ConfirmPassword string `json:"confirm_password"`
 }
 
 type userResponse struct {
@@ -940,8 +941,14 @@ func (s *Server) handlePasswordResetConfirm(c *gin.Context) {
 
 	token := strings.TrimSpace(req.Token)
 	password := strings.TrimSpace(req.Password)
-	if token == "" || password == "" {
+	confirm := strings.TrimSpace(req.ConfirmPassword)
+	if token == "" || password == "" || confirm == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "token and password are required"})
+		return
+	}
+
+	if password != confirm {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "hasła muszą być takie same"})
 		return
 	}
 

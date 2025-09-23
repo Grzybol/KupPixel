@@ -20,6 +20,7 @@ type Config struct {
 	Database                 *DatabaseConfig   `json:"database"`
 	Email                    EmailConfig       `json:"email"`
 	PasswordReset            PasswordReset     `json:"passwordReset"`
+	Verification             Verification      `json:"verification"`
 }
 
 // EmailConfig controls localisation of transactional emails sent by the backend.
@@ -31,6 +32,11 @@ type EmailConfig struct {
 type PasswordReset struct {
 	TokenTTLHours int    `json:"tokenTtlHours"`
 	BaseURL       string `json:"baseUrl"`
+}
+
+// Verification holds configuration for verification tokens and links.
+type Verification struct {
+	TokenTTLHours int `json:"tokenTtlHours"`
 }
 
 // DatabaseConfig encapsulates storage backend configuration.
@@ -81,6 +87,7 @@ func Default() *Config {
 		Database:                 defaultDatabaseConfig(),
 		Email:                    EmailConfig{Language: "pl"},
 		PasswordReset:            PasswordReset{TokenTTLHours: 24},
+		Verification:             Verification{TokenTTLHours: 24},
 	}
 }
 
@@ -148,6 +155,10 @@ func Load(path string) (*Config, error) {
 		cfg.PasswordReset.TokenTTLHours = Default().PasswordReset.TokenTTLHours
 	}
 	cfg.PasswordReset.BaseURL = strings.TrimSpace(cfg.PasswordReset.BaseURL)
+
+	if cfg.Verification.TokenTTLHours <= 0 {
+		cfg.Verification.TokenTTLHours = Default().Verification.TokenTTLHours
+	}
 
 	if cfg.Database == nil {
 		cfg.Database = defaultDatabaseConfig()

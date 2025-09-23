@@ -49,6 +49,9 @@ func TestLoad_DisableVerificationWithoutSMTP(t *testing.T) {
 	if cfg.PasswordReset.TokenTTLHours != Default().PasswordReset.TokenTTLHours {
 		t.Fatalf("expected default reset ttl, got %d", cfg.PasswordReset.TokenTTLHours)
 	}
+	if cfg.Verification.TokenTTLHours != Default().Verification.TokenTTLHours {
+		t.Fatalf("expected default verification ttl, got %d", cfg.Verification.TokenTTLHours)
+	}
 }
 
 func TestLoad_WithValidSMTP(t *testing.T) {
@@ -93,6 +96,9 @@ func TestLoad_WithValidSMTP(t *testing.T) {
 	if cfg.PasswordReset.TokenTTLHours != Default().PasswordReset.TokenTTLHours {
 		t.Fatalf("expected default reset ttl, got %d", cfg.PasswordReset.TokenTTLHours)
 	}
+	if cfg.Verification.TokenTTLHours != Default().Verification.TokenTTLHours {
+		t.Fatalf("expected default verification ttl, got %d", cfg.Verification.TokenTTLHours)
+	}
 }
 
 func TestLoad_InvalidSMTP(t *testing.T) {
@@ -106,6 +112,20 @@ func TestLoad_InvalidSMTP(t *testing.T) {
 
 	if _, err := Load(path); err == nil {
 		t.Fatal("expected error when SMTP is invalid")
+	}
+}
+
+func TestLoad_CustomVerificationTTL(t *testing.T) {
+	path := writeTempConfig(t, `{
+                "verification": {"tokenTtlHours": 12}
+        }`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Verification.TokenTTLHours != 12 {
+		t.Fatalf("expected verification ttl 12, got %d", cfg.Verification.TokenTTLHours)
 	}
 }
 
@@ -170,5 +190,8 @@ func TestWriteFile_DefaultConfig(t *testing.T) {
 	}
 	if cfg.PasswordReset.TokenTTLHours != Default().PasswordReset.TokenTTLHours {
 		t.Fatalf("expected default reset ttl, got %d", cfg.PasswordReset.TokenTTLHours)
+	}
+	if cfg.Verification.TokenTTLHours != Default().Verification.TokenTTLHours {
+		t.Fatalf("expected default verification ttl, got %d", cfg.Verification.TokenTTLHours)
 	}
 }

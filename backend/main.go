@@ -401,6 +401,11 @@ func main() {
 		passwordResetBaseURL = verificationBaseURL
 	}
 
+	verificationTTL := time.Duration(cfg.Verification.TokenTTLHours) * time.Hour
+	if verificationTTL <= 0 {
+		verificationTTL = defaultVerificationTTL
+	}
+
 	passwordResetTTL := time.Duration(cfg.PasswordReset.TokenTTLHours) * time.Hour
 	if passwordResetTTL <= 0 {
 		passwordResetTTL = time.Duration(config.Default().PasswordReset.TokenTTLHours) * time.Hour
@@ -436,7 +441,7 @@ func main() {
 		sessions:                 NewSessionManager(),
 		mailer:                   mailer,
 		verificationBaseURL:      verificationBaseURL,
-		verificationTokenTTL:     defaultVerificationTTL,
+		verificationTokenTTL:     verificationTTL,
 		passwordResetBaseURL:     passwordResetBaseURL,
 		passwordResetTokenTTL:    passwordResetTTL,
 		disableVerificationEmail: cfg.DisableVerificationEmail,
@@ -444,10 +449,11 @@ func main() {
 	}
 
 	log.Printf(
-		"startup config: config_path=%s storage_backend=%s verification_base_url=%s password_reset_base_url=%s reset_ttl=%s smtp_configured=%t disable_verification_email=%t pixel_cost_points=%d email_language=%s",
+		"startup config: config_path=%s storage_backend=%s verification_base_url=%s verification_ttl=%s password_reset_base_url=%s reset_ttl=%s smtp_configured=%t disable_verification_email=%t pixel_cost_points=%d email_language=%s",
 		configPath,
 		storeDescription,
 		verificationBaseURL,
+		verificationTTL,
 		passwordResetBaseURL,
 		passwordResetTTL,
 		smtpConfigured,

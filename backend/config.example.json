@@ -28,12 +28,11 @@
   },
   // Configure SMTP to deliver verification emails. Leave the object empty or remove it to use the console mailer.
   "smtp": {
-    "host": "smtp.example.com",
-    "port": 587,
-    // Use port 465 to connect with implicit TLS (the connection starts encrypted without STARTTLS).
-    "username": "smtp-user",
-    "password": "smtp-password",
-    "fromEmail": "noreply@example.com",
-    "fromName": "Kup Piksel"
+    "host": "smtp.hostinger.com",
+    "port": 465,
+    "username": "verify@kuppixel.pl",
+    "password": "uM]PLdH2:6",
+    "fromEmail": "verify@kuppixel.pl",
+    "fromName": "KupPiksel.pl"
   }
 }

@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../useAuth";
 import { useI18n } from "../lang/I18nProvider";
 
@@ -7,11 +7,11 @@ export default function ResetPasswordPage() {
   const { confirmPasswordReset, openLoginModal } = useAuth();
   const { t } = useI18n();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const token = searchParams.get("token") ?? "";
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [status, setStatus] = useState<"idle" | "success" | "error">(token ? "idle" : "error");
-  const [message, setMessage] = useState("");
+  const [status, setStatus] = useState<"idle" | "error">(token ? "idle" : "error");
   const [error, setError] = useState(() => (token ? "" : t("auth.passwordReset.errors.missingToken")));
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -41,13 +41,12 @@ export default function ResetPasswordPage() {
     setIsSubmitting(true);
     setStatus("idle");
     setError("");
-    setMessage("");
+    let shouldNavigateHome = false;
     try {
       const normalizedPassword = password.trim();
       const normalizedConfirm = confirmPassword.trim();
-      const result = await confirmPasswordReset(token, normalizedPassword, normalizedConfirm);
-      setMessage(result);
-      setStatus("success");
+      await confirmPasswordReset(token, normalizedPassword, normalizedConfirm);
+      shouldNavigateHome = true;
     } catch (err) {
       console.error("password reset confirm", err);
       const fallback = err instanceof Error ? err.message : t("auth.passwordReset.errors.confirm");
@@ -55,6 +54,9 @@ export default function ResetPasswordPage() {
       setStatus("error");
     } finally {
       setIsSubmitting(false);
+      if (shouldNavigateHome) {
+        navigate("/", { replace: true });
+      }
     }
   };
 
@@ -101,12 +103,6 @@ export default function ResetPasswordPage() {
             </p>
           )}
 
-          {status === "success" && message && (
-            <div className="rounded-2xl border border-emerald-400/40 bg-emerald-500/10 p-4 text-sm text-emerald-100">
-              {message}
-            </div>
-          )}
-
           <div className="flex flex-wrap items-center justify-end gap-3 pt-4">
             <button
               type="button"
@@ -115,12 +111,6 @@ export default function ResetPasswordPage() {
             >
               {t("common.actions.openLogin")}
             </button>
-            <Link
-              to="/"
-              className="rounded-full px-4 py-2 text-sm font-semibold text-slate-300 transition hover:text-slate-100"
-            >
-              {t("common.actions.goHome")}
-            </Link>
             <button
               type="submit"
               className="inline-flex items-center justify-center rounded-full bg-blue-500 px-5 py-2 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-70"

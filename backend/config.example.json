@@ -7,6 +7,10 @@
     // Controls the language used in verification and password reset emails. Supported values: "pl", "en".
     "language": "pl"
   },
+  "verification": {
+    // Verification token time to live in hours.
+    "tokenTtlHours": 24
+  },
   "passwordReset": {
     // Base URL used to construct password reset links (fallbacks to PASSWORD_RESET_LINK_BASE_URL or VERIFICATION_LINK_BASE_URL).
     "baseUrl": "http://localhost:3000",

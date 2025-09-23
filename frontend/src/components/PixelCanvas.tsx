@@ -1,4 +1,4 @@
-import { MouseEvent, WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useI18n } from "../lang/I18nProvider";
 
@@ -18,6 +18,7 @@ export type PixelCanvasProps = {
 };
 
 const FREE_COLOR: [number, number, number] = [55, 65, 81];
+type WheelEvent = globalThis.WheelEvent;
 
 function normalizeHex(color?: string): string | undefined {
   if (!color) return undefined;
@@ -63,12 +64,14 @@ export default function PixelCanvas({
   const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
   const [previewPixels, setPreviewPixels] = useState<Pixel[]>([]);
+  const [isHovered, setIsHovered] = useState(false);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const isDraggingRef = useRef(false);
   const didDragRef = useRef(false);
   const preventClickRef = useRef(false);
   const isPanningRef = useRef(false);
   const lastPanPositionRef = useRef<{ x: number; y: number } | null>(null);
+  const originalBodyOverflowRef = useRef<string | null>(null);
   const { t } = useI18n();
 
   const MIN_WINDOW_SIZE = 3;
@@ -203,7 +206,7 @@ export default function PixelCanvas({
   }, [offsetX, offsetY, visibleHeight, visibleWidth, data]);
 
   const getBoardCoordinates = useCallback(
-    (event: MouseEvent<HTMLCanvasElement>) => {
+    (event: { clientX: number; clientY: number }) => {
       const canvas = canvasRef.current;
       if (!canvas) {
         return null;
@@ -369,7 +372,12 @@ export default function PixelCanvas({
     finalizeSelection();
   };
 
+  const handleMouseEnter = () => {
+    setIsHovered(true);
+  };
+
   const handleMouseLeave = () => {
+    setIsHovered(false);
     if (isDraggingRef.current || isPanningRef.current) {
       preventClickRef.current = true;
     }
@@ -416,22 +424,57 @@ export default function PixelCanvas({
     [clampOffset, computeVisibleHeight, computeVisibleWidth, height, maxZoom, width]
   );
 
-  const handleWheel = (event: WheelEvent<HTMLCanvasElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const info = getBoardCoordinates(event);
-    const anchor = info
-      ? {
-          x: Math.min(Math.max(info.boardX, 0), Math.max(0, width - 1)),
-          y: Math.min(Math.max(info.boardY, 0), Math.max(0, height - 1)),
-        }
-      : undefined;
-    if (event.deltaY > 0) {
-      adjustZoom("out", anchor);
-    } else if (event.deltaY < 0) {
-      adjustZoom("in", anchor);
+  const handleWheel = useCallback(
+    (event: WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const info = getBoardCoordinates(event);
+      const anchor = info
+        ? {
+            x: Math.min(Math.max(info.boardX, 0), Math.max(0, width - 1)),
+            y: Math.min(Math.max(info.boardY, 0), Math.max(0, height - 1)),
+          }
+        : undefined;
+      if (event.deltaY > 0) {
+        adjustZoom("out", anchor);
+      } else if (event.deltaY < 0) {
+        adjustZoom("in", anchor);
+      }
+    },
+    [adjustZoom, getBoardCoordinates, height, width]
+  );
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      canvas.removeEventListener("wheel", handleWheel);
+    };
+  }, [handleWheel]);
+
+  useEffect(() => {
+    const body = document.body;
+    if (!body) return;
+
+    if (isHovered) {
+      if (originalBodyOverflowRef.current === null) {
+        originalBodyOverflowRef.current = body.style.overflow;
+      }
+      body.style.overflow = "hidden";
+    } else if (originalBodyOverflowRef.current !== null) {
+      body.style.overflow = originalBodyOverflowRef.current;
+      originalBodyOverflowRef.current = null;
     }
-  };
+
+    return () => {
+      if (originalBodyOverflowRef.current !== null) {
+        body.style.overflow = originalBodyOverflowRef.current;
+        originalBodyOverflowRef.current = null;
+      }
+    };
+  }, [isHovered]);
 
   const EPSILON = 1e-6;
   const canZoomIn = zoom < maxZoom - EPSILON && (visibleWidth > MIN_WINDOW_SIZE || visibleHeight > MIN_WINDOW_SIZE);
@@ -447,8 +490,8 @@ export default function PixelCanvas({
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
+        onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        onWheel={handleWheel}
         className="w-full border border-slate-700 rounded-lg shadow-md"
         style={{
           imageRendering: "pixelated",

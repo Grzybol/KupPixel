@@ -64,12 +64,14 @@ export default function PixelCanvas({
   const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
   const [previewPixels, setPreviewPixels] = useState<Pixel[]>([]);
+  const [isHovered, setIsHovered] = useState(false);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const isDraggingRef = useRef(false);
   const didDragRef = useRef(false);
   const preventClickRef = useRef(false);
   const isPanningRef = useRef(false);
   const lastPanPositionRef = useRef<{ x: number; y: number } | null>(null);
+  const originalBodyOverflowRef = useRef<string | null>(null);
   const { t } = useI18n();
 
   const MIN_WINDOW_SIZE = 3;
@@ -370,7 +372,12 @@ export default function PixelCanvas({
     finalizeSelection();
   };
 
+  const handleMouseEnter = () => {
+    setIsHovered(true);
+  };
+
   const handleMouseLeave = () => {
+    setIsHovered(false);
     if (isDraggingRef.current || isPanningRef.current) {
       preventClickRef.current = true;
     }
@@ -447,6 +454,28 @@ export default function PixelCanvas({
     };
   }, [handleWheel]);
 
+  useEffect(() => {
+    const body = document.body;
+    if (!body) return;
+
+    if (isHovered) {
+      if (originalBodyOverflowRef.current === null) {
+        originalBodyOverflowRef.current = body.style.overflow;
+      }
+      body.style.overflow = "hidden";
+    } else if (originalBodyOverflowRef.current !== null) {
+      body.style.overflow = originalBodyOverflowRef.current;
+      originalBodyOverflowRef.current = null;
+    }
+
+    return () => {
+      if (originalBodyOverflowRef.current !== null) {
+        body.style.overflow = originalBodyOverflowRef.current;
+        originalBodyOverflowRef.current = null;
+      }
+    };
+  }, [isHovered]);
+
   const EPSILON = 1e-6;
   const canZoomIn = zoom < maxZoom - EPSILON && (visibleWidth > MIN_WINDOW_SIZE || visibleHeight > MIN_WINDOW_SIZE);
   const canZoomOut = zoom > 1 + EPSILON;
@@ -461,6 +490,7 @@ export default function PixelCanvas({
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
+        onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         className="w-full border border-slate-700 rounded-lg shadow-md"
         style={{

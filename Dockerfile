@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1.4
 
 FROM node:18-alpine AS frontend-builder
+ARG VITE_TURNSTILE_SITE_KEY="1x00000000000000000000AA"
+ENV VITE_TURNSTILE_SITE_KEY=${VITE_TURNSTILE_SITE_KEY}
 WORKDIR /app/frontend
 COPY frontend/package.json ./
 RUN --mount=type=cache,target=/root/.npm npm install

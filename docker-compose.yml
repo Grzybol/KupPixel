@@ -2,7 +2,10 @@ version: "3.9"
 
 services:
   kup-piksel:
-    build: .
+    build:
+      context: .
+      args:
+        VITE_TURNSTILE_SITE_KEY: ${VITE_TURNSTILE_SITE_KEY:?Set VITE_TURNSTILE_SITE_KEY to your public Cloudflare Turnstile site key}
     ports:
       - "3000:3000"
     environment:

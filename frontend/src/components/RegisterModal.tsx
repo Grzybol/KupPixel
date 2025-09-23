@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../useAuth";
 import ResendVerificationForm from "./ResendVerificationForm";
 import { useI18n } from "../lang/I18nProvider";
+import TurnstileWidget from "./TurnstileWidget";
+import { TURNSTILE_SITE_KEY } from "../config";
 
 type RegisterModalProps = {
   isOpen: boolean;
@@ -19,9 +21,16 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const { t } = useI18n();
   const termsTemplate = t("registerModal.terms", { termsLink: "__LINK__" });
   const [termsPrefix, termsSuffix = ""] = termsTemplate.split("__LINK__");
+
+  const resetCaptcha = useCallback(() => {
+    setCaptchaToken("");
+    setCaptchaResetKey((key) => key + 1);
+  }, []);
 
   const resetState = useCallback(() => {
     setEmail("");
@@ -31,7 +40,8 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
     setIsSubmitting(false);
     setIsSuccess(false);
     setSuccessMessage(null);
-  }, []);
+    resetCaptcha();
+  }, [resetCaptcha]);
 
   const handleClose = useCallback(() => {
     if (isSubmitting) return;
@@ -47,9 +57,13 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
         setError(t("auth.messages.registerTermsError"));
         return;
       }
+      if (!captchaToken) {
+        setError(t("auth.captcha.required"));
+        return;
+      }
       setIsSubmitting(true);
       try {
-        const result = await register({ email, password });
+        const result = await register({ email, password, turnstileToken: captchaToken });
         setPassword("");
         setIsSuccess(true);
         setSuccessMessage(result.message);
@@ -59,9 +73,10 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
         setError(message);
       } finally {
         setIsSubmitting(false);
+        resetCaptcha();
       }
     },
-    [acceptedTerms, email, password, register, t]
+    [acceptedTerms, captchaToken, email, register, resetCaptcha, t]
   );
 
   if (!isOpen) {
@@ -181,6 +196,21 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
                 {error}
               </p>
             )}
+
+            <div className="space-y-2">
+              <p className="text-xs text-slate-400">{t("auth.captcha.label")}</p>
+              <TurnstileWidget
+                siteKey={TURNSTILE_SITE_KEY}
+                onTokenChange={setCaptchaToken}
+                onExpire={() => {
+                  setCaptchaToken("");
+                  setError(t("auth.captcha.required"));
+                }}
+                onError={(message) => setError(message)}
+                resetKey={captchaResetKey}
+                className="mt-1"
+              />
+            </div>
 
             <div className="flex flex-col gap-3 pt-4 sm:flex-row sm:items-center sm:justify-between">
               {onOpenLogin && (

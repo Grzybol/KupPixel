@@ -22,15 +22,29 @@ export type AuthUser = {
 type LoginCredentials = {
   email: string;
   password: string;
+  turnstileToken: string;
 };
 
 type RegisterCredentials = {
   email: string;
   password: string;
+  turnstileToken: string;
 };
 
 type RegisterResult = {
   message: string;
+};
+
+type PasswordResetRequestPayload = {
+  email: string;
+  turnstileToken: string;
+};
+
+type PasswordResetConfirmPayload = {
+  token: string;
+  password: string;
+  confirmPassword: string;
+  turnstileToken: string;
 };
 
 type OpenOptions = {
@@ -42,8 +56,8 @@ type AuthContextValue = {
   isLoading: boolean;
   login: (credentials: LoginCredentials) => Promise<void>;
   register: (credentials: RegisterCredentials) => Promise<RegisterResult>;
-  requestPasswordReset: (email: string) => Promise<string>;
-  confirmPasswordReset: (token: string, password: string, confirmPassword: string) => Promise<string>;
+  requestPasswordReset: (payload: PasswordResetRequestPayload) => Promise<string>;
+  confirmPasswordReset: (payload: PasswordResetConfirmPayload) => Promise<string>;
   logout: () => Promise<void>;
   refresh: () => Promise<AuthUser | null>;
   ensureAuthenticated: (options?: OpenOptions) => Promise<boolean>;
@@ -176,6 +190,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         body: JSON.stringify({
           email: credentials.email,
           password: credentials.password,
+          turnstile_token: credentials.turnstileToken,
         }),
       });
       const payload = await response.json().catch(() => null);
@@ -213,7 +228,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
           "Content-Type": "application/json",
         },
         credentials: "include",
-        body: JSON.stringify(credentials),
+        body: JSON.stringify({
+          email: credentials.email,
+          password: credentials.password,
+          turnstile_token: credentials.turnstileToken,
+        }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
@@ -238,13 +257,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
   );
 
   const requestPasswordReset = useCallback(
-    async (email: string): Promise<string> => {
+    async ({ email, turnstileToken }: PasswordResetRequestPayload): Promise<string> => {
       const response = await fetch("/api/password-reset/request", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ email }),
+        credentials: "include",
+        body: JSON.stringify({ email, turnstile_token: turnstileToken }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
@@ -264,13 +284,19 @@ export function AuthProvider({ children }: PropsWithChildren) {
   );
 
   const confirmPasswordReset = useCallback(
-    async (token: string, password: string, confirmPassword: string): Promise<string> => {
+    async ({ token, password, confirmPassword, turnstileToken }: PasswordResetConfirmPayload): Promise<string> => {
       const response = await fetch("/api/password-reset/confirm", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ token, password, confirm_password: confirmPassword }),
+        credentials: "include",
+        body: JSON.stringify({
+          token,
+          password,
+          confirm_password: confirmPassword,
+          turnstile_token: turnstileToken,
+        }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {

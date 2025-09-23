@@ -1,7 +1,9 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useCallback, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../useAuth";
 import { useI18n } from "../lang/I18nProvider";
+import TurnstileWidget from "./TurnstileWidget";
+import { TURNSTILE_SITE_KEY } from "../config";
 
 export default function ResetPasswordPage() {
   const { confirmPasswordReset, openLoginModal } = useAuth();
@@ -14,6 +16,13 @@ export default function ResetPasswordPage() {
   const [status, setStatus] = useState<"idle" | "error">(token ? "idle" : "error");
   const [error, setError] = useState(() => (token ? "" : t("auth.passwordReset.errors.missingToken")));
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
+
+  const resetCaptcha = useCallback(() => {
+    setCaptchaToken("");
+    setCaptchaResetKey((key) => key + 1);
+  }, []);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -37,6 +46,11 @@ export default function ResetPasswordPage() {
       setStatus("error");
       return;
     }
+    if (!captchaToken) {
+      setError(t("auth.captcha.required"));
+      setStatus("error");
+      return;
+    }
 
     setIsSubmitting(true);
     setStatus("idle");
@@ -45,7 +59,12 @@ export default function ResetPasswordPage() {
     try {
       const normalizedPassword = password.trim();
       const normalizedConfirm = confirmPassword.trim();
-      await confirmPasswordReset(token, normalizedPassword, normalizedConfirm);
+      await confirmPasswordReset({
+        token,
+        password: normalizedPassword,
+        confirmPassword: normalizedConfirm,
+        turnstileToken: captchaToken,
+      });
       shouldNavigateHome = true;
     } catch (err) {
       console.error("password reset confirm", err);
@@ -54,6 +73,7 @@ export default function ResetPasswordPage() {
       setStatus("error");
     } finally {
       setIsSubmitting(false);
+      resetCaptcha();
       if (shouldNavigateHome) {
         navigate("/", { replace: true });
       }
@@ -102,6 +122,25 @@ export default function ResetPasswordPage() {
               {error}
             </p>
           )}
+
+          <div className="space-y-2">
+            <p className="text-xs text-slate-400">{t("auth.captcha.label")}</p>
+            <TurnstileWidget
+              siteKey={TURNSTILE_SITE_KEY}
+              onTokenChange={setCaptchaToken}
+              onExpire={() => {
+                setCaptchaToken("");
+                setError(t("auth.captcha.required"));
+                setStatus("error");
+              }}
+              onError={(message) => {
+                setError(message);
+                setStatus("error");
+              }}
+              resetKey={captchaResetKey}
+              className="mt-1"
+            />
+          </div>
 
           <div className="flex flex-wrap items-center justify-end gap-3 pt-4">
             <button

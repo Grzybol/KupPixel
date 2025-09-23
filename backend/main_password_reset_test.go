@@ -52,8 +52,9 @@ func TestPasswordResetFlow(t *testing.T) {
 		passwordResetTokenTTL: time.Hour,
 		pixelCostPoints:       10,
 	}
+	enableTurnstileForTest(server)
 
-	body := bytes.NewBufferString(`{"email":"user@example.com"}`)
+	body := bytes.NewBufferString(`{"email":"user@example.com","turnstile_token":"` + testTurnstileToken + `"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/password-reset/request", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -88,7 +89,7 @@ func TestPasswordResetFlow(t *testing.T) {
 		t.Fatalf("expected token to belong to user %d, got %d", user.ID, record.UserID)
 	}
 
-	confirmBody := bytes.NewBufferString(fmt.Sprintf(`{"token":"%s","password":"new-secret","confirm_password":"new-secret"}`, token))
+	confirmBody := bytes.NewBufferString(fmt.Sprintf(`{"token":"%s","password":"new-secret","confirm_password":"new-secret","turnstile_token":"%s"}`, token, testTurnstileToken))
 	confirmReq := httptest.NewRequest(http.MethodPost, "/api/password-reset/confirm", confirmBody)
 	confirmReq.Header.Set("Content-Type", "application/json")
 	confirmW := httptest.NewRecorder()
@@ -100,7 +101,7 @@ func TestPasswordResetFlow(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", confirmW.Code)
 	}
 
-	loginBody := bytes.NewBufferString(`{"email":"user@example.com","password":"new-secret"}`)
+	loginBody := bytes.NewBufferString(`{"email":"user@example.com","password":"new-secret","turnstile_token":"` + testTurnstileToken + `"}`)
 	loginReq := httptest.NewRequest(http.MethodPost, "/api/login", loginBody)
 	loginReq.Header.Set("Content-Type", "application/json")
 	loginW := httptest.NewRecorder()
@@ -112,7 +113,7 @@ func TestPasswordResetFlow(t *testing.T) {
 		t.Fatalf("expected successful login with new password, got %d", loginW.Code)
 	}
 
-	oldLoginBody := bytes.NewBufferString(`{"email":"user@example.com","password":"initial"}`)
+	oldLoginBody := bytes.NewBufferString(`{"email":"user@example.com","password":"initial","turnstile_token":"` + testTurnstileToken + `"}`)
 	oldLoginReq := httptest.NewRequest(http.MethodPost, "/api/login", oldLoginBody)
 	oldLoginReq.Header.Set("Content-Type", "application/json")
 	oldLoginW := httptest.NewRecorder()

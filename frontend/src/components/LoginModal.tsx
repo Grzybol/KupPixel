@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../useAuth";
 import ResendVerificationForm from "./ResendVerificationForm";
 import { useI18n } from "../lang/I18nProvider";
+import TurnstileWidget from "./TurnstileWidget";
+import { TURNSTILE_SITE_KEY } from "../config";
 
 export default function LoginModal() {
   const { isLoginModalOpen, closeLoginModal, login, loginPrompt } = useAuth();
@@ -11,14 +13,22 @@ export default function LoginModal() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const { t } = useI18n();
+
+  const resetCaptcha = useCallback(() => {
+    setCaptchaToken("");
+    setCaptchaResetKey((key) => key + 1);
+  }, []);
 
   const resetState = useCallback(() => {
     setEmail("");
     setPassword("");
     setError(null);
     setIsSubmitting(false);
-  }, []);
+    resetCaptcha();
+  }, [resetCaptcha]);
 
   const handleClose = useCallback(() => {
     if (isSubmitting) return;
@@ -37,9 +47,15 @@ export default function LoginModal() {
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       setError(null);
+      if (!captchaToken) {
+        setError(t("auth.captcha.required"));
+        return;
+      }
       setIsSubmitting(true);
+      let shouldReset = false;
       try {
-        await login({ email, password });
+        await login({ email, password, turnstileToken: captchaToken });
+        shouldReset = true;
         resetState();
       } catch (err) {
         console.error("login error", err);
@@ -47,9 +63,12 @@ export default function LoginModal() {
         setError(message);
       } finally {
         setIsSubmitting(false);
+        if (!shouldReset) {
+          resetCaptcha();
+        }
       }
     },
-    [email, login, password, resetState, t]
+    [captchaToken, email, login, password, resetCaptcha, resetState, t]
   );
 
   const showResend = useMemo(() => {
@@ -123,16 +142,30 @@ export default function LoginModal() {
             </button>
           </div>
 
-          {error && (
-            <p role="alert" className="text-sm text-rose-400">
-              {error}
-            </p>
-          )}
-          {showResend && (
-            <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-4 text-sm text-blue-100">
-              <p className="mb-3">{t("auth.messages.resendPrompt")}</p>
-              <ResendVerificationForm initialEmail={email} className="space-y-3" />
-            </div>
+        {error && (
+          <p role="alert" className="text-sm text-rose-400">
+            {error}
+          </p>
+        )}
+        <div className="space-y-2">
+          <p className="text-xs text-slate-400">{t("auth.captcha.label")}</p>
+          <TurnstileWidget
+            siteKey={TURNSTILE_SITE_KEY}
+            onTokenChange={setCaptchaToken}
+            onExpire={() => {
+              setCaptchaToken("");
+              setError(t("auth.captcha.required"));
+            }}
+            onError={(message) => setError(message)}
+            resetKey={captchaResetKey}
+            className="mt-1"
+          />
+        </div>
+        {showResend && (
+          <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-4 text-sm text-blue-100">
+            <p className="mb-3">{t("auth.messages.resendPrompt")}</p>
+            <ResendVerificationForm initialEmail={email} className="space-y-3" />
+          </div>
           )}
 
           <div className="flex items-center justify-end gap-3 pt-4">

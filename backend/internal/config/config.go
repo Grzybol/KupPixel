@@ -21,6 +21,7 @@ type Config struct {
 	Email                    EmailConfig       `json:"email"`
 	PasswordReset            PasswordReset     `json:"passwordReset"`
 	Verification             Verification      `json:"verification"`
+	TurnstileSecretKey       string            `json:"turnstileSecretKey"`
 }
 
 // EmailConfig controls localisation of transactional emails sent by the backend.
@@ -150,6 +151,8 @@ func Load(path string) (*Config, error) {
 	if cfg.Email.Language == "" {
 		cfg.Email.Language = Default().Email.Language
 	}
+
+	cfg.TurnstileSecretKey = strings.TrimSpace(cfg.TurnstileSecretKey)
 
 	if cfg.PasswordReset.TokenTTLHours <= 0 {
 		cfg.PasswordReset.TokenTTLHours = Default().PasswordReset.TokenTTLHours

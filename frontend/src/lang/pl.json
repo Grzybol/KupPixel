@@ -146,6 +146,13 @@
         "passwordConfirmationRequired": "Powtórz nowe hasło.",
         "passwordMismatch": "Hasła muszą być identyczne."
       }
+    },
+    "captcha": {
+      "label": "Potwierdź, że nie jesteś robotem.",
+      "loading": "Ładuję zabezpieczenie...",
+      "error": "Nie udało się załadować zabezpieczenia. Odśwież stronę i spróbuj ponownie.",
+      "missing": "Konfiguracja zabezpieczenia jest niekompletna. Skontaktuj się z administratorem.",
+      "required": "Potwierdź, że nie jesteś robotem."
     }
   },
   "landing": {
@@ -274,6 +281,13 @@
   "termsFooter": {
     "disclaimer": "Korzystanie z serwisu oznacza akceptację regulaminu.",
     "cta": "Przeczytaj regulamin"
+  },
+  "cookies": {
+    "banner": {
+      "message": "Używamy plików cookies, aby zapamiętać Twoje preferencje i analizować ruch w serwisie.",
+      "accept": "Akceptuję",
+      "moreInfo": "Dowiedz się więcej"
+    }
   },
   "terms": {
     "title": "Regulamin serwisu KupPixel",

@@ -109,11 +109,12 @@ func LoadSMTPConfigFromEnv(getenv func(string) string) (*SMTPConfig, error) {
 type SMTPMailer struct {
 	config   SMTPConfig
 	auth     smtp.Auth
+	locale   localeContent
 	sendMail func(ctx context.Context, cfg SMTPConfig, auth smtp.Auth, from string, to []string, msg []byte) error
 }
 
 // NewSMTPMailer constructs a Mailer using real SMTP transport.
-func NewSMTPMailer(cfg SMTPConfig) (*SMTPMailer, error) {
+func NewSMTPMailer(cfg SMTPConfig, language string) (*SMTPMailer, error) {
 	cfg.Sanitize()
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -127,6 +128,7 @@ func NewSMTPMailer(cfg SMTPConfig) (*SMTPMailer, error) {
 	return &SMTPMailer{
 		config: cfg,
 		auth:   auth,
+		locale: resolveLocale(language),
 		sendMail: func(ctx context.Context, cfg SMTPConfig, auth smtp.Auth, from string, to []string, msg []byte) error {
 			return sendMailWithContext(ctx, cfg, auth, from, to, msg)
 		},
@@ -167,9 +169,9 @@ func (m *SMTPMailer) SendVerificationEmail(ctx context.Context, recipient, verif
 		to.Address,
 	)
 
-	subject := "Potwierdź swój adres e-mail"
+	subject := m.locale.verificationSubject
 	encodedSubject := mime.QEncoding.Encode("utf-8", subject)
-	body := fmt.Sprintf("Cześć!\n\nKliknij poniższy link, aby potwierdzić swoje konto w Kup Piksel:\n%s\n\nJeżeli to nie Ty zakładałeś konto, zignoruj tę wiadomość.\n", verificationLink)
+	body := fmt.Sprintf(m.locale.verificationBody, verificationLink)
 
 	var msg bytes.Buffer
 	msg.WriteString(fmt.Sprintf("From: %s\r\n", from.String()))
@@ -188,6 +190,64 @@ func (m *SMTPMailer) SendVerificationEmail(ctx context.Context, recipient, verif
 		return fmt.Errorf("send smtp email: %w", err)
 	}
 	log.Printf("[smtp] verification email sent successfully to %s", recipient)
+	return nil
+}
+
+// SendPasswordResetEmail sends a password reset link to the user.
+func (m *SMTPMailer) SendPasswordResetEmail(ctx context.Context, recipient, resetLink string) error {
+	if m == nil {
+		return errors.New("smtp mailer is nil")
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	recipient = strings.TrimSpace(recipient)
+	if recipient == "" {
+		return errors.New("recipient must not be empty")
+	}
+	if _, err := mail.ParseAddress(recipient); err != nil {
+		return fmt.Errorf("invalid recipient: %w", err)
+	}
+
+	resetLink = strings.TrimSpace(resetLink)
+	if resetLink == "" {
+		return errors.New("reset link must not be empty")
+	}
+
+	from := mail.Address{Name: m.config.FromName, Address: m.config.FromEmail}
+	to := mail.Address{Address: recipient}
+
+	log.Printf(
+		"[smtp] preparing password reset email via %s from=%s to=%s",
+		m.config.Address(),
+		from.String(),
+		to.Address,
+	)
+
+	subject := m.locale.resetSubject
+	encodedSubject := mime.QEncoding.Encode("utf-8", subject)
+	body := fmt.Sprintf(m.locale.resetBody, resetLink)
+
+	var msg bytes.Buffer
+	msg.WriteString(fmt.Sprintf("From: %s\r\n", from.String()))
+	msg.WriteString(fmt.Sprintf("To: %s\r\n", to.String()))
+	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", encodedSubject))
+	msg.WriteString("MIME-Version: 1.0\r\n")
+	msg.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
+	msg.WriteString("Content-Transfer-Encoding: 8bit\r\n")
+	msg.WriteString("\r\n")
+	msg.WriteString(body)
+
+	payload := msg.Bytes()
+	log.Printf("[smtp] sending email payload size=%d bytes", len(payload))
+
+	if err := m.sendMail(ctx, m.config, m.auth, m.config.FromEmail, []string{recipient}, payload); err != nil {
+		return fmt.Errorf("send smtp email: %w", err)
+	}
+	log.Printf("[smtp] password reset email sent successfully to %s", recipient)
 	return nil
 }
 

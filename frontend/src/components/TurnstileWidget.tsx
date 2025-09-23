@@ -1,0 +1,138 @@
+import { useEffect, useRef, useState } from "react";
+import { loadTurnstile } from "../utils/turnstile";
+import { useI18n } from "../lang/I18nProvider";
+
+type TurnstileWidgetProps = {
+siteKey: string;
+onTokenChange: (token: string) => void;
+onError?: (message: string) => void;
+onExpire?: () => void;
+action?: string;
+className?: string;
+resetKey?: number | string;
+};
+
+type LoadState = "idle" | "loading" | "ready" | "error";
+
+export default function TurnstileWidget({
+siteKey,
+onTokenChange,
+onError,
+onExpire,
+action,
+className,
+resetKey,
+}: TurnstileWidgetProps) {
+const containerRef = useRef<HTMLDivElement | null>(null);
+const widgetIdRef = useRef<string | null>(null);
+const { t } = useI18n();
+const [state, setState] = useState<LoadState>("idle");
+const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+useEffect(() => {
+let isActive = true;
+
+onTokenChange("");
+
+if (!siteKey) {
+const message = t("auth.captcha.missing");
+setState("error");
+setErrorMessage(message);
+onError?.(message);
+return () => {
+onTokenChange("");
+};
+}
+
+setState("loading");
+setErrorMessage(null);
+
+loadTurnstile()
+.then(() => {
+if (!isActive) {
+return;
+}
+if (!containerRef.current || !window.turnstile) {
+const message = t("auth.captcha.error");
+setState("error");
+setErrorMessage(message);
+onError?.(message);
+onTokenChange("");
+return;
+}
+
+try {
+widgetIdRef.current = window.turnstile.render(containerRef.current, {
+sitekey: siteKey,
+action,
+theme: "dark",
+callback: (token) => {
+if (!isActive) {
+return;
+}
+onTokenChange(token);
+setState("ready");
+setErrorMessage(null);
+},
+"expired-callback": () => {
+onTokenChange("");
+onExpire?.();
+},
+"error-callback": () => {
+const message = t("auth.captcha.error");
+setState("error");
+setErrorMessage(message);
+onError?.(message);
+onTokenChange("");
+},
+});
+setState("ready");
+} catch (error) {
+console.error("turnstile render", error);
+const message = t("auth.captcha.error");
+setState("error");
+setErrorMessage(message);
+onError?.(message);
+onTokenChange("");
+}
+})
+.catch((error) => {
+if (!isActive) {
+return;
+}
+console.error("turnstile load", error);
+const message = t("auth.captcha.error");
+setState("error");
+setErrorMessage(message);
+onError?.(message);
+onTokenChange("");
+});
+
+return () => {
+isActive = false;
+onTokenChange("");
+if (widgetIdRef.current && window.turnstile) {
+try {
+window.turnstile.remove(widgetIdRef.current);
+} catch (error) {
+console.error("turnstile cleanup", error);
+}
+}
+widgetIdRef.current = null;
+};
+}, [siteKey, action, resetKey, onTokenChange, onError, onExpire, t]);
+
+return (
+<div className={className}>
+<div ref={containerRef} className="min-h-[65px]" />
+{state === "loading" && (
+<p className="mt-2 text-xs text-slate-400">{t("auth.captcha.loading")}</p>
+)}
+{state === "error" && errorMessage && (
+<p role="alert" className="mt-2 text-xs text-rose-400">
+{errorMessage}
+</p>
+)}
+</div>
+);
+}

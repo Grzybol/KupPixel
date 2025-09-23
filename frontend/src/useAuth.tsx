@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useI18n } from "./lang/I18nProvider";
 
 export type AuthUser = {
   id?: number;
@@ -21,15 +22,29 @@ export type AuthUser = {
 type LoginCredentials = {
   email: string;
   password: string;
+  turnstileToken: string;
 };
 
 type RegisterCredentials = {
   email: string;
   password: string;
+  turnstileToken: string;
 };
 
 type RegisterResult = {
   message: string;
+};
+
+type PasswordResetRequestPayload = {
+  email: string;
+  turnstileToken: string;
+};
+
+type PasswordResetConfirmPayload = {
+  token: string;
+  password: string;
+  confirmPassword: string;
+  turnstileToken: string;
 };
 
 type OpenOptions = {
@@ -41,6 +56,8 @@ type AuthContextValue = {
   isLoading: boolean;
   login: (credentials: LoginCredentials) => Promise<void>;
   register: (credentials: RegisterCredentials) => Promise<RegisterResult>;
+  requestPasswordReset: (payload: PasswordResetRequestPayload) => Promise<string>;
+  confirmPasswordReset: (payload: PasswordResetConfirmPayload) => Promise<string>;
   logout: () => Promise<void>;
   refresh: () => Promise<AuthUser | null>;
   ensureAuthenticated: (options?: OpenOptions) => Promise<boolean>;
@@ -87,6 +104,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [loginPrompt, setLoginPrompt] = useState<string | null>(null);
   const [pixelCostPoints, setPixelCostPoints] = useState<number | null>(null);
   const loginResolverRef = useRef<((result: boolean) => void) | null>(null);
+  const { t } = useI18n();
 
   const closeModal = useCallback(() => {
     setIsLoginModalOpen(false);
@@ -109,7 +127,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
           return null;
         }
         const message = await response.text().catch(() => "");
-        throw new Error(message || `Nie udało się odświeżyć sesji (${response.status})`);
+        throw new Error(message || t("auth.errors.refresh", { status: response.status }));
       }
       const data = await response.json().catch(() => null);
       const parsed = parseUser(data);
@@ -125,7 +143,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [t]);
 
   const openLoginModal = useCallback(
     (options?: OpenOptions) => {
@@ -172,6 +190,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         body: JSON.stringify({
           email: credentials.email,
           password: credentials.password,
+          turnstile_token: credentials.turnstileToken,
         }),
       });
       const payload = await response.json().catch(() => null);
@@ -179,12 +198,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
         const message =
           (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).error === "string"
             ? ((payload as Record<string, unknown>).error as string)
-            : null) || "Nie udało się zalogować. Spróbuj ponownie.";
+            : null) || t("auth.errors.login");
         throw new Error(message);
       }
       const parsed = parseUser(payload);
       if (!parsed) {
-        throw new Error("Nie udało się odczytać informacji o koncie.");
+        throw new Error(t("auth.errors.parseUser"));
       }
       setUser(parsed);
       const cost = extractPixelCostPoints(payload);
@@ -198,7 +217,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         loginResolverRef.current = null;
       }
     },
-    []
+    [t]
   );
 
   const register = useCallback(
@@ -209,28 +228,91 @@ export function AuthProvider({ children }: PropsWithChildren) {
           "Content-Type": "application/json",
         },
         credentials: "include",
-        body: JSON.stringify(credentials),
+        body: JSON.stringify({
+          email: credentials.email,
+          password: credentials.password,
+          turnstile_token: credentials.turnstileToken,
+        }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
         const message =
           (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).error === "string"
             ? ((payload as Record<string, unknown>).error as string)
-            : null) || "Nie udało się utworzyć konta. Spróbuj ponownie.";
+            : null) || t("auth.errors.register");
         throw new Error(message);
       }
 
       const message =
         payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).message === "string"
           ? ((payload as Record<string, unknown>).message as string)
-          : "Konto zostało utworzone. Sprawdź skrzynkę e-mail.";
+          : t("auth.messages.registerSuccess");
       if (loginResolverRef.current) {
         loginResolverRef.current(false);
         loginResolverRef.current = null;
       }
       return { message };
     },
-    []
+    [t]
+  );
+
+  const requestPasswordReset = useCallback(
+    async ({ email, turnstileToken }: PasswordResetRequestPayload): Promise<string> => {
+      const response = await fetch("/api/password-reset/request", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({ email, turnstile_token: turnstileToken }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message =
+          (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).error === "string"
+            ? ((payload as Record<string, unknown>).error as string)
+            : null) || t("auth.passwordReset.errors.request");
+        throw new Error(message);
+      }
+      const message =
+        payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).message === "string"
+          ? ((payload as Record<string, unknown>).message as string)
+          : t("auth.passwordReset.success");
+      return message;
+    },
+    [t]
+  );
+
+  const confirmPasswordReset = useCallback(
+    async ({ token, password, confirmPassword, turnstileToken }: PasswordResetConfirmPayload): Promise<string> => {
+      const response = await fetch("/api/password-reset/confirm", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          token,
+          password,
+          confirm_password: confirmPassword,
+          turnstile_token: turnstileToken,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message =
+          (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).error === "string"
+            ? ((payload as Record<string, unknown>).error as string)
+            : null) || t("auth.passwordReset.errors.confirm");
+        throw new Error(message);
+      }
+      const message =
+        payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).message === "string"
+          ? ((payload as Record<string, unknown>).message as string)
+          : t("auth.passwordReset.confirmSuccess");
+      return message;
+    },
+    [t]
   );
 
   const logout = useCallback(async () => {
@@ -260,6 +342,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
       isLoading,
       login,
       register,
+      requestPasswordReset,
+      confirmPasswordReset,
       logout,
       refresh,
       ensureAuthenticated,
@@ -277,6 +361,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
       login,
       loginPrompt,
       logout,
+      requestPasswordReset,
+      confirmPasswordReset,
       openLoginModal,
       refresh,
       user,

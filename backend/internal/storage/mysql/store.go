@@ -16,10 +16,11 @@ import (
 )
 
 type (
-	Pixel             = storage.Pixel
-	User              = storage.User
-	VerificationToken = storage.VerificationToken
-	PixelState        = storage.PixelState
+	Pixel              = storage.Pixel
+	User               = storage.User
+	VerificationToken  = storage.VerificationToken
+	PasswordResetToken = storage.PasswordResetToken
+	PixelState         = storage.PixelState
 )
 
 //go:embed migrations/*.sql
@@ -622,6 +623,88 @@ func (s *Store) MarkUserVerified(ctx context.Context, userID int64) error {
 	affected, affErr := res.RowsAffected()
 	if affErr != nil {
 		return fmt.Errorf("mark user verified rows affected: %w", affErr)
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Store) CreatePasswordResetToken(ctx context.Context, token string, userID int64, expiresAt time.Time) (PasswordResetToken, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return PasswordResetToken{}, errors.New("token must not be empty")
+	}
+	if userID <= 0 {
+		return PasswordResetToken{}, errors.New("invalid user id")
+	}
+
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `INSERT INTO password_reset_tokens (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)`, token, userID, expiresAt.UTC(), now)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+			return PasswordResetToken{}, fmt.Errorf("token already exists: %w", err)
+		}
+		return PasswordResetToken{}, fmt.Errorf("insert password reset token: %w", err)
+	}
+
+	return PasswordResetToken{Token: token, UserID: userID, ExpiresAt: expiresAt.UTC(), CreatedAt: now}, nil
+}
+
+func (s *Store) GetPasswordResetToken(ctx context.Context, token string) (PasswordResetToken, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return PasswordResetToken{}, errors.New("token must not be empty")
+	}
+
+	row := s.db.QueryRowContext(ctx, `SELECT token, user_id, expires_at, created_at FROM password_reset_tokens WHERE token = ?`, token)
+	var record PasswordResetToken
+	if err := row.Scan(&record.Token, &record.UserID, &record.ExpiresAt, &record.CreatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return PasswordResetToken{}, sql.ErrNoRows
+		}
+		return PasswordResetToken{}, fmt.Errorf("get password reset token: %w", err)
+	}
+	record.ExpiresAt = record.ExpiresAt.UTC()
+	record.CreatedAt = record.CreatedAt.UTC()
+	return record, nil
+}
+
+func (s *Store) DeletePasswordResetToken(ctx context.Context, token string) error {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return errors.New("token must not be empty")
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM password_reset_tokens WHERE token = ?`, token); err != nil {
+		return fmt.Errorf("delete password reset token: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) DeletePasswordResetTokensForUser(ctx context.Context, userID int64) error {
+	if userID <= 0 {
+		return errors.New("invalid user id")
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM password_reset_tokens WHERE user_id = ?`, userID); err != nil {
+		return fmt.Errorf("delete password reset tokens for user: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) UpdateUserPassword(ctx context.Context, userID int64, passwordHash string) error {
+	if userID <= 0 {
+		return errors.New("invalid user id")
+	}
+	if strings.TrimSpace(passwordHash) == "" {
+		return errors.New("password hash must not be empty")
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash = ? WHERE id = ?`, passwordHash, userID)
+	if err != nil {
+		return fmt.Errorf("update user password: %w", err)
+	}
+	affected, affErr := res.RowsAffected()
+	if affErr != nil {
+		return fmt.Errorf("update user password rows affected: %w", affErr)
 	}
 	if affected == 0 {
 		return sql.ErrNoRows

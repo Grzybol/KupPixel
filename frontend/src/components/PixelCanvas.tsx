@@ -1,5 +1,6 @@
 import { MouseEvent, WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
+import { useI18n } from "../lang/I18nProvider";
 
 export type Pixel = {
   id: number;
@@ -68,6 +69,7 @@ export default function PixelCanvas({
   const preventClickRef = useRef(false);
   const isPanningRef = useRef(false);
   const lastPanPositionRef = useRef<{ x: number; y: number } | null>(null);
+  const { t } = useI18n();
 
   const MIN_WINDOW_SIZE = 3;
   const ZOOM_STEP = 1.25;
@@ -490,7 +492,7 @@ export default function PixelCanvas({
             } as CSSProperties;
           })()}
         >
-          <span className="sr-only">{previewPixels.length} wolnych pikseli zaznaczonych</span>
+          <span className="sr-only">{t("pixelCanvas.selection", { count: previewPixels.length })}</span>
         </div>
       )}
       <div className="mt-3 flex justify-center gap-3">

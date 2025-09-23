@@ -74,7 +74,7 @@ func TestSMTPMailerSendVerificationEmail(t *testing.T) {
 		FromEmail: "noreply@example.com",
 		FromName:  "Kup Piksel",
 	}
-	mailer, err := NewSMTPMailer(cfg)
+	mailer, err := NewSMTPMailer(cfg, "pl")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestSMTPMailerSendVerificationEmail(t *testing.T) {
 			FromEmail: "noreply@example.com",
 			FromName:  "Kup Piksel",
 		}
-		mailer, err := NewSMTPMailer(cfg)
+		mailer, err := NewSMTPMailer(cfg, "pl")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -156,6 +156,37 @@ func TestSMTPMailerSendVerificationEmail(t *testing.T) {
 			t.Fatalf("expected context cancellation error, got %v", err)
 		}
 	})
+}
+
+func TestSMTPMailerSendPasswordResetEmail(t *testing.T) {
+	cfg := SMTPConfig{
+		Host:      "smtp.example.com",
+		Port:      587,
+		FromEmail: "noreply@example.com",
+		FromName:  "Kup Piksel",
+	}
+	mailer, err := NewSMTPMailer(cfg, "en")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var capturedMsg []byte
+	mailer.sendMail = func(ctx context.Context, cfg SMTPConfig, a smtp.Auth, from string, to []string, msg []byte) error {
+		capturedMsg = append([]byte(nil), msg...)
+		return nil
+	}
+
+	if err := mailer.SendPasswordResetEmail(context.Background(), "user@example.com", "https://example.com/reset?token=abc"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	payload := strings.ToLower(string(capturedMsg))
+	if !strings.Contains(payload, "subject: reset your password") {
+		t.Fatalf("expected english subject in payload, got %s", string(capturedMsg))
+	}
+	if !strings.Contains(string(capturedMsg), "https://example.com/reset?token=abc") {
+		t.Fatalf("expected reset link in payload")
+	}
 }
 
 func TestSendMailWithContextImplicitTLS(t *testing.T) {

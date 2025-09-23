@@ -1,20 +1,34 @@
 import { FormEvent, useCallback, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../useAuth";
 import ResendVerificationForm from "./ResendVerificationForm";
+import { useI18n } from "../lang/I18nProvider";
+import TurnstileWidget from "./TurnstileWidget";
+import { TURNSTILE_SITE_KEY } from "../config";
 
 export default function LoginModal() {
   const { isLoginModalOpen, closeLoginModal, login, loginPrompt } = useAuth();
+  const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
+  const { t } = useI18n();
+
+  const resetCaptcha = useCallback(() => {
+    setCaptchaToken("");
+    setCaptchaResetKey((key) => key + 1);
+  }, []);
 
   const resetState = useCallback(() => {
     setEmail("");
     setPassword("");
     setError(null);
     setIsSubmitting(false);
-  }, []);
+    resetCaptcha();
+  }, [resetCaptcha]);
 
   const handleClose = useCallback(() => {
     if (isSubmitting) return;
@@ -22,23 +36,39 @@ export default function LoginModal() {
     closeLoginModal();
   }, [closeLoginModal, isSubmitting, resetState]);
 
+  const handleForgotPassword = useCallback(() => {
+    if (isSubmitting) return;
+    resetState();
+    closeLoginModal();
+    navigate("/forgot-password");
+  }, [closeLoginModal, isSubmitting, navigate, resetState]);
+
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       setError(null);
+      if (!captchaToken) {
+        setError(t("auth.captcha.required"));
+        return;
+      }
       setIsSubmitting(true);
+      let shouldReset = false;
       try {
-        await login({ email, password });
+        await login({ email, password, turnstileToken: captchaToken });
+        shouldReset = true;
         resetState();
       } catch (err) {
         console.error("login error", err);
-        const message = err instanceof Error ? err.message : "Nie udało się zalogować.";
+        const message = err instanceof Error ? err.message : t("auth.errors.login");
         setError(message);
       } finally {
         setIsSubmitting(false);
+        if (!shouldReset) {
+          resetCaptcha();
+        }
       }
     },
-    [email, login, password, resetState]
+    [captchaToken, email, login, password, resetCaptcha, resetState, t]
   );
 
   const showResend = useMemo(() => {
@@ -60,16 +90,14 @@ export default function LoginModal() {
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-semibold text-slate-100">Zaloguj się</h2>
-            <p className="mt-1 text-sm text-slate-400">
-              {loginPrompt || "Podaj dane logowania, aby kontynuować."}
-            </p>
+            <h2 className="text-2xl font-semibold text-slate-100">{t("loginModal.title")}</h2>
+            <p className="mt-1 text-sm text-slate-400">{loginPrompt || t("auth.messages.loginModalDefault")}</p>
           </div>
           <button
             type="button"
             onClick={handleClose}
             className="rounded-full bg-slate-800/80 p-2 text-slate-400 transition hover:text-slate-200"
-            aria-label="Zamknij"
+            aria-label={t("common.actions.close")}
           >
             ×
           </button>
@@ -77,7 +105,7 @@ export default function LoginModal() {
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <label className="block text-sm font-medium text-slate-200">
-            Adres e-mail
+            {t("common.labels.email")}
             <input
               type="email"
               value={email}
@@ -91,7 +119,7 @@ export default function LoginModal() {
           </label>
 
           <label className="block text-sm font-medium text-slate-200">
-            Hasło
+            {t("common.labels.password")}
             <input
               type="password"
               value={password}
@@ -103,16 +131,41 @@ export default function LoginModal() {
             />
           </label>
 
-          {error && (
-            <p role="alert" className="text-sm text-rose-400">
-              {error}
-            </p>
-          )}
-          {showResend && (
-            <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-4 text-sm text-blue-100">
-              <p className="mb-3">Nie otrzymałeś wiadomości? Wyślij ponownie link weryfikacyjny.</p>
-              <ResendVerificationForm initialEmail={email} className="space-y-3" />
-            </div>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={handleForgotPassword}
+              className="text-sm font-medium text-blue-400 transition hover:text-blue-300"
+              disabled={isSubmitting}
+            >
+              {t("auth.passwordReset.link")}
+            </button>
+          </div>
+
+        {error && (
+          <p role="alert" className="text-sm text-rose-400">
+            {error}
+          </p>
+        )}
+        <div className="space-y-2">
+          <p className="text-xs text-slate-400">{t("auth.captcha.label")}</p>
+          <TurnstileWidget
+            siteKey={TURNSTILE_SITE_KEY}
+            onTokenChange={setCaptchaToken}
+            onExpire={() => {
+              setCaptchaToken("");
+              setError(t("auth.captcha.required"));
+            }}
+            onError={(message) => setError(message)}
+            resetKey={captchaResetKey}
+            className="mt-1"
+          />
+        </div>
+        {showResend && (
+          <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-4 text-sm text-blue-100">
+            <p className="mb-3">{t("auth.messages.resendPrompt")}</p>
+            <ResendVerificationForm initialEmail={email} className="space-y-3" />
+          </div>
           )}
 
           <div className="flex items-center justify-end gap-3 pt-4">
@@ -122,14 +175,14 @@ export default function LoginModal() {
               className="rounded-full px-4 py-2 text-sm font-semibold text-slate-300 transition hover:text-slate-100"
               disabled={isSubmitting}
             >
-              Anuluj
+              {t("common.actions.cancel")}
             </button>
             <button
               type="submit"
               className="inline-flex items-center justify-center rounded-full bg-blue-500 px-5 py-2 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-70"
               disabled={isSubmitting}
             >
-              {isSubmitting ? "Logowanie..." : "Zaloguj"}
+              {isSubmitting ? t("loginModal.submitting") : t("loginModal.submit")}
             </button>
           </div>
         </form>

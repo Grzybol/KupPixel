@@ -1,0 +1,380 @@
+{
+  "common": {
+    "appName": "Kup Piksel",
+    "languageLabel": "Język",
+    "actions": {
+      "activate": "Aktywuj",
+      "activateCode": "Aktywuj kod",
+      "cancel": "Anuluj",
+      "close": "Zamknij",
+      "editUrl": "Zmień URL",
+      "goBack": "← Wróć na tablicę",
+      "goHome": "Wróć na stronę główną",
+      "login": "Zaloguj",
+      "loginCta": "Zaloguj się",
+      "logout": "Wyloguj",
+      "openLogin": "Przejdź do logowania",
+      "openRegister": "Załóż konto",
+      "readTerms": "Przeczytaj regulamin",
+      "refresh": "Odśwież dane",
+      "register": "Zarejestruj się",
+      "resend": "Wyślij ponownie",
+      "save": "Zapisz",
+      "simulatePurchase": "Zasymuluj zakup",
+      "submit": "Wyślij"
+    },
+    "labels": {
+      "email": "Adres e-mail",
+      "password": "Hasło",
+      "confirmPassword": "Powtórz hasło",
+      "pixelColor": "Kolor piksela",
+      "pixelUrl": "Adres URL reklamy",
+      "activationCode": "Kod aktywacyjny",
+      "balance": "Saldo",
+      "pixelCost": "Koszt piksela"
+    },
+    "placeholders": {
+      "pixelUrl": "https://twoja-domena.pl",
+      "email": "adres@email.pl",
+      "activationCode": "XXXX-XXXX-XXXX-XXXX"
+    },
+    "status": {
+      "loading": "Ładuję...",
+      "processing": "Przetwarzanie płatności...",
+      "sending": "Wysyłanie..."
+    },
+    "units": {
+      "points": "{{count}} punktów",
+      "pointsShort": "pkt"
+    }
+  },
+  "navigation": {
+    "home": "Home",
+    "account": "Twoje konto",
+    "activateCode": "Aktywuj kod",
+    "balance": "Saldo: {{points}} pkt",
+    "pixelCost": "Koszt piksela: {{points}} pkt",
+    "loginPrompt": "Zaloguj się, aby rozpocząć."
+  },
+  "auth": {
+    "errors": {
+      "refresh": "Nie udało się odświeżyć sesji ({{status}})",
+      "parseUser": "Nie udało się odczytać informacji o koncie.",
+      "login": "Nie udało się zalogować. Spróbuj ponownie.",
+      "register": "Nie udało się utworzyć konta. Spróbuj ponownie.",
+      "logout": "Nie udało się zarezerwować piksela. Spróbuj ponownie.",
+      "purchase": "Nie udało się zarezerwować żadnego z zaznaczonych pikseli. Spróbuj ponownie.",
+      "fetchPixels": "Nie udało się pobrać stanu pikseli.",
+      "account": "Wystąpił błąd podczas pobierania danych konta.",
+      "savePixel": "Nie udało się zapisać zmian.",
+      "activateCode": "Nie udało się aktywować kodu.",
+      "resend": "Nie udało się wysłać wiadomości. Spróbuj ponownie.",
+      "resendGeneric": "Nie udało się wysłać wiadomości.",
+      "verify": "Nie udało się potwierdzić adresu e-mail.",
+      "verifyMissingToken": "Brakuje tokenu weryfikacyjnego w adresie URL.",
+      "verifyUnexpected": "Wystąpił nieoczekiwany błąd. Spróbuj ponownie później.",
+      "api": "Błąd API: {{status}}",
+      "requiresLogin": "Aby kontynuować, zaloguj się.",
+      "insufficientPoints": "Brak wystarczającej liczby punktów, aby kupić piksel. Aktywuj kod i spróbuj ponownie.",
+      "invalidUrl": "Adres URL musi zawierać poprawny schemat (np. https://).",
+      "missingUrl": "Podaj poprawny adres URL.",
+      "missingColor": "Ten piksel nie ma przypisanego koloru i nie może zostać zaktualizowany.",
+      "activationFormat": "Kod musi mieć format XXXX-XXXX-XXXX-XXXX i składać się z cyfr lub liter.",
+      "sessionExpired": "Twoja sesja wygasła. Zaloguj się ponownie.",
+      "sessionExpiredLong": "Twoja sesja wygasła. Zaloguj się ponownie i spróbuj jeszcze raz.",
+      "loginRequired": "Aby zobaczyć tablicę pikseli, zaloguj się.",
+      "loginToView": "Zaloguj się, aby zobaczyć dane swojego konta.",
+      "loginToViewPixels": "Zaloguj się ponownie, aby zobaczyć swoje piksele.",
+      "loginToUpdate": "Zaloguj się, aby zaktualizować adres reklamy.",
+      "loginToBuy": "Zaloguj się, aby kupić wybrany piksel.",
+      "loginToBuyMany": "Zaloguj się, aby kupić zaznaczone piksele.",
+      "loginToProceed": "Zaloguj się, aby kupić zaznaczone piksele.",
+      "loginToStart": "Zaloguj się, aby rozpocząć.",
+      "loginToFinish": "Zaloguj się ponownie, aby sfinalizować zakup.",
+      "selectionRequired": "Wybierz co najmniej jeden piksel, aby kontynuować."
+    },
+    "messages": {
+      "registerSuccess": "Konto zostało utworzone. Sprawdź skrzynkę e-mail.",
+      "loginModalDefault": "Podaj dane logowania, aby kontynuować.",
+      "activationInfo": "Aktywuj kod, aby otrzymać punkty i kupować piksele.",
+      "activationCost": "Koszt jednego piksela to {{points}} punktów.",
+      "activationSuccess": "Kod został aktywowany.",
+      "activationSuccessWithPoints": "Kod aktywowany! Dodano {{added}} punktów{{suffix}}",
+      "activationSuffix": " (razem {{total}} pkt).",
+      "resendPrompt": "Nie otrzymałeś wiadomości? Wyślij ponownie link weryfikacyjny.",
+      "resendSuccess": "Wysłaliśmy nowy link weryfikacyjny.",
+      "verifySuccess": "Adres e-mail został potwierdzony. Możesz się teraz zalogować.",
+      "verifyLoading": "Trwa potwierdzanie tokenu weryfikacyjnego...",
+      "verificationEmailInfo": "Wpisz swój adres, aby otrzymać nowy link weryfikacyjny.",
+      "simulationProcessing": "Trwa wirtualne potwierdzanie płatności. To potrwa tylko chwilkę...",
+      "simulationInfo": "Symulacja nie pobiera prawdziwych środków – to jedynie podgląd przyszłego doświadczenia.",
+      "simulationPartial": "Nie wszystkie piksele udało się kupić. Sprawdź szczegóły poniżej.",
+      "accountUpdated": "Adres reklamy został zaktualizowany.",
+      "registerTermsError": "Aby utworzyć konto, zaakceptuj regulamin.",
+      "registerInfo": "Podaj adres e-mail i hasło, aby utworzyć konto i rozpocząć zabawę z tablicą pikseli.",
+      "registerEmailInfo": "Wysłaliśmy do Ciebie wiadomość z linkiem aktywacyjnym. Kliknij go, aby dokończyć rejestrację.",
+      "registerHelp": "Nie widzisz wiadomości? Sprawdź folder spam lub poczekaj kilka minut. Możesz też wysłać link ponownie poniżej.",
+      "accountBalanceHint": "Aktywuj kody, aby zdobyć więcej punktów i zajmować kolejne piksele.",
+      "accountPixelCostHint": "Do zajęcia nowego piksela potrzebujesz co najmniej tylu punktów.",
+      "accountManageHint": "Aktywuj kod lub odśwież dane, aby zobaczyć aktualne punkty.",
+      "accountNoPixels": "Nie masz jeszcze żadnych wykupionych pikseli.",
+      "accountLoading": "Ładuję dane konta...",
+      "accountPixels": "Wykupione piksele",
+      "accountLoggedInAs": "Zalogowano jako {{email}}",
+      "accountIntro": "Zarządzaj zakupionymi pikselami i aktualizuj adresy reklam.",
+      "loginPrompt": "Podaj dane logowania, aby kontynuować.",
+      "verifyResendTitle": "Wyślij link ponownie",
+      "verifyResendDescription": "Wpisz swój adres e-mail, aby otrzymać nowy token weryfikacyjny.",
+      "verifyErrorTitle": "Nie udało się potwierdzić konta",
+      "verifyReady": "Gotowe!"
+    },
+    "passwordReset": {
+      "title": "Zresetuj hasło",
+      "description": "Podaj adres e-mail, aby otrzymać instrukcje resetu.",
+      "submit": "Wyślij link resetujący",
+      "success": "Jeśli konto istnieje, wysłaliśmy instrukcje resetu na Twój adres e-mail.",
+      "link": "Nie pamiętasz hasła?",
+      "confirmTitle": "Ustaw nowe hasło",
+      "confirmDescription": "Wpisz nowe hasło dla swojego konta.",
+      "confirmSubmit": "Zapisz nowe hasło",
+      "confirmSuccess": "Hasło zostało zaktualizowane. Możesz się teraz zalogować.",
+      "errors": {
+        "request": "Nie udało się wysłać prośby o reset hasła. Spróbuj ponownie.",
+        "confirm": "Nie udało się zresetować hasła. Spróbuj ponownie.",
+        "missingToken": "Brak lub nieprawidłowy token resetujący.",
+        "passwordRequired": "Podaj nowe hasło.",
+        "passwordConfirmationRequired": "Powtórz nowe hasło.",
+        "passwordMismatch": "Hasła muszą być identyczne."
+      }
+    },
+    "captcha": {
+      "label": "Potwierdź, że nie jesteś robotem.",
+      "loading": "Ładuję zabezpieczenie...",
+      "error": "Nie udało się załadować zabezpieczenia. Odśwież stronę i spróbuj ponownie.",
+      "missing": "Konfiguracja zabezpieczenia jest niekompletna. Skontaktuj się z administratorem.",
+      "required": "Potwierdź, że nie jesteś robotem."
+    }
+  },
+  "landing": {
+    "title": "Kup Piksel",
+    "subtitle": "Wybierz swój piksel na cyfrowej tablicy 1000×1000 i zostaw po sobie ślad.",
+    "stats": {
+      "taken": "Zajęte: {{count}}",
+      "free": "Wolne: {{count}}"
+    },
+    "balance": {
+      "label": "Saldo: {{points}} pkt",
+      "pixelCost": "Koszt piksela: {{points}} pkt",
+      "missing": "Sprawdź konfigurację",
+      "loggedOut": "Zaloguj się"
+    },
+    "loading": "Ładuję siatkę pikseli...",
+    "instructionsTitle": "Jak pracować z tablicą:",
+    "instructions": {
+      "single": "Kliknij pojedynczy piksel, aby przejść do edycji lub otworzyć link reklamowy właściciela.",
+      "multi": "Przeciągnij z wciśniętym lewym przyciskiem myszy, aby zaznaczyć blok wolnych pikseli do wspólnego zakupu.",
+      "pan": "Przytrzymaj {{ctrl}} lub {{shift}} i przeciągaj, aby płynnie przesuwać widok tablicy.",
+      "zoom": "Przy dużym powiększeniu pojawia się siatka pomocnicza, która ułatwia liczenie i precyzyjne ustawianie pikseli."
+    },
+    "selection": "Zaznaczono {{count}} wolnych pikseli. Dokończ zakup na stronie formularza, aby zarezerwować wszystkie.",
+    "tips": "Wskazówki powyżej pomogą Ci szybko odnaleźć się na tablicy — od pojedynczych kliknięć, przez zaznaczanie obszarów, po płynne przesuwanie i precyzyjną pracę na dużym powiększeniu.",
+    "linkOpen": "Otwórz w nowej karcie"
+  },
+  "buy": {
+    "titleSingle": "Kup ten piksel",
+    "titleMultiple": "Kup wybrane piksele",
+    "descriptionSingle": "Wybrałeś piksel o ID {{id}}. Tutaj możesz dobrać kolor i przejść przez fikcyjny proces płatności, aby zobaczyć, jak będzie działał prawdziwy checkout.",
+    "descriptionMultiple": "Wybrałeś {{count}} wolnych pikseli o ID: {{ids}}. Tutaj możesz dobrać kolor i przejść przez fikcyjny proces płatności, aby zobaczyć, jak będzie działał prawdziwy checkout.",
+    "unknownPixel": "nieznany",
+    "costTitle": "Koszt zakupu",
+    "balanceTitle": "Twoje saldo",
+    "configure": "Sprawdź konfigurację",
+    "balanceLogin": "Zaloguj się",
+    "matchTitle": "Dopasuj swój piksel",
+    "matchDescription": "Wybierz kolor, który najlepiej reprezentuje Twoją markę – podgląd i wartość HEX aktualizują się automatycznie.",
+    "colorPreviewLabel": "Podgląd koloru",
+    "urlHint": "Po kliknięciu w piksel użytkownik zostanie przekierowany pod ten adres.",
+    "simulateSingle": "Zasymuluj zakup",
+    "simulateMultiple": "Zasymuluj zakup {{count}} pikseli",
+    "costBreakdown": "{{count}} × {{price}} {{unit}} = {{total}} punktów",
+    "singlePrice": "{{price}} {{unit}}",
+    "successTitle": "Udało się!",
+    "successDescriptionSingle": "Piksel #{{id}} został zarezerwowany z kolorem {{color}}.",
+    "successDescriptionMultiple": "Wszystkie {{count}} piksele zostały zarezerwowane z kolorem {{color}}.",
+    "successPreview": "Podgląd:",
+    "successMockInfo": "To wciąż makieta płatności – w produkcji dodasz prawdziwy checkout oraz potwierdzenia dla klienta.",
+    "partialTitle": "Częściowy sukces",
+    "partialDescription": "Część pikseli została zakupiona, ale kilka wymaga ponownej próby. Sprawdź szczegóły powyżej i spróbuj ponownie po rozwiązaniu problemów.",
+    "resultsTitle": "Rezultaty zakupu",
+    "resultStatus": {
+      "taken": "Kupiono"
+    },
+    "return": "Wróć na tablicę"
+  },
+  "pixelCanvas": {
+    "selection": "{{count}} wolnych pikseli zaznaczonych"
+  },
+  "account": {
+    "title": "Twoje konto",
+    "saldoTitle": "Saldo punktów",
+    "pixelCostTitle": "Koszt jednego piksela",
+    "manageTitle": "Zarządzaj saldem",
+    "activate": "Aktywuj kod",
+    "refresh": "Odśwież dane",
+    "noData": "Brak danych",
+    "table": {
+      "id": "ID",
+      "position": "Pozycja",
+      "color": "Kolor",
+      "url": "Adres URL",
+      "updatedAt": "Ostatnia aktualizacja",
+      "actions": "Akcje",
+      "noUrl": "Brak",
+      "coordinates": "x: {{x}}, y: {{y}}"
+    },
+    "modal": {
+      "title": "Aktywuj kod punktowy",
+      "currentBalance": "Aktualne saldo: {{points}} pkt"
+    }
+  },
+  "activationModal": {
+    "title": "Aktywuj kod punktowy",
+    "info": "Aktywuj kod, aby otrzymać punkty i kupować piksele.",
+    "currentBalance": "Aktualne saldo: {{points}} pkt",
+    "error": "Nie udało się aktywować kodu.",
+    "submit": "Aktywuj",
+    "submitting": "Aktywuję..."
+  },
+  "loginModal": {
+    "title": "Zaloguj się",
+    "close": "Zamknij",
+    "cancel": "Anuluj",
+    "submit": "Zaloguj",
+    "submitting": "Logowanie..."
+  },
+  "registerModal": {
+    "title": "Załóż konto",
+    "successTitle": "Potwierdź adres e-mail",
+    "terms": "Akceptuję {{termsLink}} serwisu.",
+    "termsLink": "Regulamin",
+    "loginCta": "Masz już konto? Zaloguj się",
+    "submit": "Zarejestruj się",
+    "submitting": "Tworzenie..."
+  },
+  "resend": {
+    "title": "Adres e-mail",
+    "hint": "Wpisz swój adres, aby otrzymać nowy link weryfikacyjny.",
+    "submit": "Wyślij ponownie",
+    "submitting": "Wysyłanie..."
+  },
+  "verify": {
+    "title": "Potwierdzenie adresu e-mail",
+    "loading": "Trwa potwierdzanie tokenu weryfikacyjnego...",
+    "success": "Adres e-mail został potwierdzony. Możesz się teraz zalogować.",
+    "goToLogin": "Przejdź do logowania",
+    "goHome": "Wróć na stronę główną"
+  },
+  "notFound": {
+    "title": "Ups! Nie znaleziono strony.",
+    "cta": "Wróć na tablicę pikseli"
+  },
+  "termsFooter": {
+    "disclaimer": "Korzystanie z serwisu oznacza akceptację regulaminu.",
+    "cta": "Przeczytaj regulamin"
+  },
+  "cookies": {
+    "banner": {
+      "message": "Używamy plików cookies, aby zapamiętać Twoje preferencje i analizować ruch w serwisie.",
+      "accept": "Akceptuję",
+      "moreInfo": "Dowiedz się więcej"
+    }
+  },
+  "terms": {
+    "title": "Regulamin serwisu KupPixel",
+    "intro": "Niniejszy regulamin określa zasady korzystania z serwisu KupPixel, w tym warunki świadczenia usług drogą elektroniczną, zasady odpowiedzialności oraz tryb składania reklamacji. Korzystając z serwisu, akceptujesz postanowienia poniższego dokumentu.",
+    "sections": [
+      {
+        "title": "1. Postanowienia ogólne",
+        "paragraphs": [
+          "1.1. Administratorem serwisu jest KupPixel Sp. z o.o. z siedzibą w Warszawie.",
+          "1.2. Regulamin określa zasady korzystania z usług dostępnych za pośrednictwem serwisu internetowego KupPixel, w szczególności zasady rejestracji, nabywania pól pikselowych oraz publikowania treści.",
+          "1.3. Korzystanie z serwisu wymaga akceptacji regulaminu oraz posiadania aktywnego konta użytkownika."
+        ]
+      },
+      {
+        "title": "2. Rejestracja i konto użytkownika",
+        "paragraphs": [
+          "2.1. Rejestracja konta jest dobrowolna i odbywa się poprzez wypełnienie formularza rejestracyjnego oraz potwierdzenie adresu e-mail.",
+          "2.2. Użytkownik zobowiązany jest do podania prawdziwych danych oraz aktualizacji ich w razie zmian. Administrator nie ponosi odpowiedzialności za skutki podania błędnych danych kontaktowych.",
+          "2.3. Użytkownik jest zobowiązany do ochrony danych logowania przed osobami trzecimi. Wszelkie czynności dokonane po zalogowaniu uważa się za działania użytkownika."
+        ]
+      },
+      {
+        "title": "3. Zakup i zarządzanie pikselami",
+        "paragraphs": [
+          "3.1. Użytkownik może nabywać piksele zgodnie z obowiązującym cennikiem, wyrażonym w punktach lub innych jednostkach wskazanych w serwisie.",
+          "3.2. Po nabyciu pikseli użytkownik może umieszczać na nich grafiki, linki oraz teksty, o ile nie naruszają one prawa, dobrych obyczajów ani praw osób trzecich.",
+          "3.3. Administrator zastrzega sobie prawo do odmowy publikacji lub usunięcia treści, które naruszają regulamin lub powszechnie obowiązujące przepisy. W takim przypadku użytkownikowi nie przysługuje zwrot poniesionych kosztów, jeżeli naruszenie wynikało z jego zawinionego działania."
+        ]
+      },
+      {
+        "title": "4. Minimalna odpowiedzialność",
+        "paragraphs": [
+          "4.1. Administrator ponosi odpowiedzialność wobec użytkownika jedynie w granicach rzeczywistej szkody, będącej bezpośrednim i zawinionym następstwem niewykonania lub nienależytego wykonania usługi. Odpowiedzialność za utracone korzyści jest wyłączona w najszerszym dopuszczalnym przez prawo zakresie.",
+          "4.2. Administrator nie odpowiada za szkody wynikłe z:"
+        ],
+        "list": [
+          "działań lub zaniechań użytkownika lub osób trzecich,",
+          "zdarzeń siły wyższej, awarii sieci telekomunikacyjnych, serwerów lub oprogramowania,",
+          "zawieszenia lub zakończenia świadczenia usług wynikających z naruszenia regulaminu przez użytkownika."
+        ]
+      },
+      {
+        "title": "5. Brak gwarancji",
+        "paragraphs": [
+          "5.1. Serwis KupPixel świadczony jest w stanie „takim, jaki jest”. Administrator nie udziela żadnej gwarancji, w tym gwarancji przydatności do określonego celu, ciągłej dostępności czy bezbłędnego działania serwisu.",
+          "5.2. Administrator nie gwarantuje skuteczności działań marketingowych prowadzonych przez użytkownika przy użyciu nabytych pikseli ani liczby odwiedzin generowanych przez linki."
+        ]
+      },
+      {
+        "title": "6. Prawo do zmian oferty",
+        "paragraphs": [
+          "6.1. Administrator zastrzega sobie prawo do wprowadzania zmian w ofercie serwisu, w tym modyfikacji funkcjonalności, cennika, zasad przyznawania punktów oraz warunków promocji.",
+          "6.2. Zmiany wchodzą w życie w terminie wskazanym w ogłoszeniu zamieszczonym na stronie głównej serwisu. Użytkownicy zostaną o nich poinformowani co najmniej 7 dni wcześniej, chyba że zmiana wynika z nagłej potrzeby zapewnienia bezpieczeństwa serwisu.",
+          "6.3. Kontynuowanie korzystania z serwisu po wejściu w życie zmian oznacza ich akceptację. W przypadku braku zgody użytkownik ma prawo do rozwiązania umowy ze skutkiem natychmiastowym."
+        ]
+      },
+      {
+        "title": "7. Prawa autorskie i treści użytkowników",
+        "paragraphs": [
+          "7.1. Użytkownik publikujący treści w serwisie oświadcza, że posiada prawa do ich rozpowszechniania lub uzyskał odpowiednie zgody.",
+          "7.2. Użytkownik udziela administratorowi niewyłącznej licencji na publiczne wyświetlanie oraz przechowywanie publikowanych materiałów w zakresie koniecznym do realizacji usług.",
+          "7.3. Administrator może usuwać treści naruszające prawo lub regulamin, a także blokować konta użytkowników dopuszczających się powtarzających naruszeń."
+        ]
+      },
+      {
+        "title": "8. Reklamacje",
+        "paragraphs": [
+          "8.1. Reklamacje dotyczące funkcjonowania serwisu można składać drogą elektroniczną na adres reklamacje@kuppixel.pl w terminie 30 dni od wystąpienia zdarzenia będącego podstawą reklamacji.",
+          "8.2. Reklamacja powinna zawierać dane umożliwiające identyfikację użytkownika oraz opis zgłaszanych zastrzeżeń. Administrator rozpatrzy zgłoszenie w terminie 14 dni roboczych od daty otrzymania.",
+          "8.3. W przypadku braku możliwości rozpatrzenia reklamacji w podanym terminie, administrator poinformuje użytkownika o przyczynach opóźnienia i wskaże przewidywany termin udzielenia odpowiedzi."
+        ]
+      },
+      {
+        "title": "9. Dane osobowe",
+        "paragraphs": [
+          "9.1. Administratorem danych osobowych użytkowników jest KupPixel Sp. z o.o. Dane przetwarzane są w celu realizacji usług elektronicznych i obsługi kont użytkownika zgodnie z polityką prywatności.",
+          "9.2. Użytkownikowi przysługuje prawo dostępu do treści swoich danych oraz ich poprawiania, ograniczenia przetwarzania, przenoszenia i usunięcia na zasadach określonych w obowiązujących przepisach."
+        ]
+      },
+      {
+        "title": "10. Postanowienia końcowe",
+        "paragraphs": [
+          "10.1. W sprawach nieuregulowanych regulaminem zastosowanie mają przepisy prawa polskiego, w szczególności ustawy o świadczeniu usług drogą elektroniczną oraz Kodeksu cywilnego.",
+          "10.2. Spory wynikłe z korzystania z serwisu rozstrzygane będą przez właściwe sądy powszechne. Użytkownik będący konsumentem może skorzystać z pozasądowych sposobów rozpatrywania sporów i dochodzenia roszczeń.",
+          "10.3. Regulamin wchodzi w życie z dniem jego publikacji na stronie serwisu."
+        ]
+      }
+    ]
+  }
+}

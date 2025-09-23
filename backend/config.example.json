@@ -3,6 +3,22 @@
   "pixelCostPoints": 10,
   // Set to true to automatically mark newly created accounts as verified and skip emails.
   "disableVerificationEmail": false,
+  // Secret key used to verify Cloudflare Turnstile challenges on protected forms.
+  "turnstileSecretKey": "",
+  "email": {
+    // Controls the language used in verification and password reset emails. Supported values: "pl", "en".
+    "language": "pl"
+  },
+  "verification": {
+    // Verification token time to live in hours.
+    "tokenTtlHours": 24
+  },
+  "passwordReset": {
+    // Base URL used to construct password reset links (fallbacks to PASSWORD_RESET_LINK_BASE_URL or VERIFICATION_LINK_BASE_URL).
+    "baseUrl": "http://localhost:3000",
+    // Password reset token time to live in hours.
+    "tokenTtlHours": 24
+  },
   "database": {
     "driver": "sqlite",
     // Optional override for sqlite database path; defaults to PIXEL_DB_PATH or data/pixels_new.db.
@@ -18,12 +34,11 @@
   },
   // Configure SMTP to deliver verification emails. Leave the object empty or remove it to use the console mailer.
   "smtp": {
-    "host": "smtp.example.com",
-    "port": 587,
-    // Use port 465 to connect with implicit TLS (the connection starts encrypted without STARTTLS).
-    "username": "smtp-user",
-    "password": "smtp-password",
-    "fromEmail": "noreply@example.com",
-    "fromName": "Kup Piksel"
+    "host": "smtp.hostinger.com",
+    "port": 465,
+    "username": "verify@kuppixel.pl",
+    "password": "asdasdasd",
+    "fromEmail": "verify@kuppixel.pl",
+    "fromName": "KupPiksel.pl"
   }
 }

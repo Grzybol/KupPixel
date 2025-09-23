@@ -6,10 +6,14 @@ import RegisterModal from "./components/RegisterModal";
 import VerifyAccountPage from "./components/VerifyAccountPage";
 import AccountPage from "./components/AccountPage";
 import ActivationCodeModal from "./components/ActivationCodeModal";
-import TermsFooter from "./components/TermsFooter";
 import NavigationBar from "./components/NavigationBar";
 import TermsPage from "./components/TermsPage";
+import ForgotPasswordPage from "./components/ForgotPasswordPage";
+import ResetPasswordPage from "./components/ResetPasswordPage";
 import { useAuth } from "./useAuth";
+import { useI18n } from "./lang/I18nProvider";
+import TermsFooter from "./components/TermsFooter";
+import CookieConsentBanner from "./components/CookieConsentBanner";
 
 type PixelResponse = {
   width: number;
@@ -22,6 +26,7 @@ function usePixels() {
   const [data, setData] = useState<PixelResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { t } = useI18n();
 
   useEffect(() => {
     let ignore = false;
@@ -35,15 +40,15 @@ function usePixels() {
           if (response.status === 401) {
             if (!ignore) {
               setData(null);
-              setError("Aby zobaczyć tablicę pikseli, zaloguj się.");
+              setError(t("auth.errors.loginRequired"));
             }
             void openLoginModal({
-              message: "Twoja sesja wygasła. Zaloguj się, aby ponownie zobaczyć tablicę.",
+              message: t("auth.errors.sessionExpired"),
             });
             return;
           }
           const message = await response.text().catch(() => "");
-          throw new Error(message || `Błąd API: ${response.status}`);
+          throw new Error(message || t("auth.errors.api", { status: response.status }));
         }
         const json = (await response.json()) as PixelResponse;
         if (!ignore) {
@@ -53,7 +58,7 @@ function usePixels() {
       } catch (err) {
         console.error(err);
         if (!ignore) {
-          const message = err instanceof Error ? err.message : "Nie udało się pobrać stanu pikseli.";
+          const message = err instanceof Error ? err.message : t("auth.errors.fetchPixels");
           setError(message);
         }
       } finally {
@@ -67,7 +72,7 @@ function usePixels() {
     return () => {
       ignore = true;
     };
-  }, [openLoginModal, user]);
+  }, [openLoginModal, t, user]);
 
   return { data, loading, error } as const;
 }
@@ -77,6 +82,7 @@ function LandingPage() {
   const { data, loading, error } = usePixels();
   const { user, ensureAuthenticated, pixelCostPoints } = useAuth();
   const [selectedPixels, setSelectedPixels] = useState<Pixel[]>([]);
+  const { t, dictionary } = useI18n();
 
   const handlePixelClick = useCallback(
     async (pixel: Pixel) => {
@@ -85,14 +91,14 @@ function LandingPage() {
         return;
       }
       const authenticated = await ensureAuthenticated({
-        message: "Zaloguj się, aby kupić wybrany piksel.",
+        message: t("auth.errors.loginToBuy"),
       });
       if (!authenticated) {
         return;
       }
       navigate(`/buy/${pixel.id}`);
     },
-    [ensureAuthenticated, navigate]
+    [ensureAuthenticated, navigate, t]
   );
 
   const handleSelectionComplete = useCallback(
@@ -106,7 +112,7 @@ function LandingPage() {
       }
 
       const authenticated = await ensureAuthenticated({
-        message: "Zaloguj się, aby kupić zaznaczone piksele.",
+        message: t("auth.errors.loginToBuyMany"),
       });
       if (!authenticated) {
         return;
@@ -121,7 +127,7 @@ function LandingPage() {
         { state: { pixelIds: ids } }
       );
     },
-    [ensureAuthenticated, handlePixelClick, navigate]
+    [ensureAuthenticated, handlePixelClick, navigate, t]
   );
 
   const heroStats = useMemo(() => {
@@ -133,52 +139,85 @@ function LandingPage() {
     return { taken, free: data.pixels.length - taken };
   }, [data]);
 
+  const pointsShort = t("common.units.pointsShort");
+  const formatPoints = useCallback((value: number) => t("common.units.points", { count: value }), [t]);
+
+  const instructionItems = useMemo<ReactNode[]>(() => {
+    const landingSection = (dictionary.landing as Record<string, unknown>) ?? {};
+    const instructions = landingSection.instructions as Record<string, unknown> | undefined;
+    const getInstruction = (key: string) => {
+      const fallbackKey = `landing.instructions.${key}`;
+      if (instructions && typeof instructions[key] === "string") {
+        return instructions[key] as string;
+      }
+      return t(fallbackKey);
+    };
+    const panText = getInstruction("pan");
+    const panParts = panText.split(/(\{\{ctrl\}\}|\{\{shift\}\})/g).filter((part) => part !== "");
+    const panNodes = panParts.map((part, index) => {
+      if (part === "{{ctrl}}") {
+        return (
+          <kbd key={`ctrl-${index}`} className="rounded bg-slate-800 px-1.5 py-0.5 text-xs font-semibold text-slate-100">
+            Ctrl
+          </kbd>
+        );
+      }
+      if (part === "{{shift}}") {
+        return (
+          <kbd key={`shift-${index}`} className="ml-1 rounded bg-slate-800 px-1.5 py-0.5 text-xs font-semibold text-slate-100">
+            Shift
+          </kbd>
+        );
+      }
+      return (
+        <span key={`text-${index}`}>{part}</span>
+      );
+    });
+    return [
+      getInstruction("single"),
+      getInstruction("multi"),
+      <>{panNodes}</>,
+      getInstruction("zoom"),
+    ];
+  }, [dictionary, t]);
+
   return (
     <div className="min-h-screen">
       <header className="py-10 text-center">
-        <h1 className="text-4xl font-bold text-blue-400">Kup Piksel</h1>
-        <p className="mt-2 text-slate-300">
-          Wybierz swój piksel na cyfrowej tablicy 1000×1000 i zostaw po sobie ślad.
-        </p>
+        <h1 className="text-4xl font-bold text-blue-400">{t("landing.title")}</h1>
+        <p className="mt-2 text-slate-300">{t("landing.subtitle")}</p>
         <div className="mt-4 flex items-center justify-center gap-6 text-sm text-slate-400">
-          <span className="font-semibold text-slate-200">Zajęte: {heroStats.taken}</span>
-          <span className="font-semibold text-slate-200">Wolne: {heroStats.free}</span>
+          <span className="font-semibold text-slate-200">{t("landing.stats.taken", { count: heroStats.taken })}</span>
+          <span className="font-semibold text-slate-200">{t("landing.stats.free", { count: heroStats.free })}</span>
         </div>
         {user && (
           <div className="mt-3 text-sm text-slate-300">
             <span className="mr-4 inline-flex items-center rounded-full bg-slate-800/70 px-4 py-1 text-slate-200">
-              Saldo: <span className="ml-1 font-semibold">{typeof user.points === "number" ? user.points : 0} pkt</span>
+              {t("common.labels.balance")}: {" "}
+              <span className="ml-1 font-semibold">
+                {`${typeof user.points === "number" ? user.points : 0} ${pointsShort}`}
+              </span>
             </span>
             {typeof pixelCostPoints === "number" && pixelCostPoints > 0 && (
               <span className="inline-flex items-center rounded-full bg-slate-800/70 px-4 py-1 text-slate-200">
-                Koszt piksela: <span className="ml-1 font-semibold">{pixelCostPoints} pkt</span>
+                {t("common.labels.pixelCost")}: {" "}
+                <span className="ml-1 font-semibold">{`${pixelCostPoints} ${pointsShort}`}</span>
               </span>
             )}
           </div>
         )}
       </header>
       <main className="mx-auto flex max-w-5xl flex-col items-center gap-6 px-4 pb-16">
-        {loading && <div className="text-slate-300">Ładuję siatkę pikseli...</div>}
+        {loading && <div className="text-slate-300">{t("landing.loading")}</div>}
         {error && <div className="text-rose-400">{error}</div>}
         {data && (
           <>
             <div className="w-full max-w-3xl rounded-xl border border-slate-600/70 bg-slate-900/70 px-6 py-4 text-sm text-slate-200 shadow-lg">
-              <h2 className="text-base font-semibold text-slate-100">Jak pracować z tablicą:</h2>
+              <h2 className="text-base font-semibold text-slate-100">{t("landing.instructionsTitle")}</h2>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-slate-300">
-                <li>
-                  Kliknij pojedynczy piksel, aby przejść do edycji lub otworzyć link reklamowy właściciela.
-                </li>
-                <li>
-                  Przeciągnij z wciśniętym lewym przyciskiem myszy, aby zaznaczyć blok wolnych pikseli do wspólnego zakupu.
-                </li>
-                <li>
-                  Przytrzymaj <kbd className="rounded bg-slate-800 px-1.5 py-0.5 text-xs font-semibold text-slate-100">Ctrl</kbd> lub
-                  <kbd className="ml-1 rounded bg-slate-800 px-1.5 py-0.5 text-xs font-semibold text-slate-100">Shift</kbd> i przeciągaj,
-                  aby płynnie przesuwać widok tablicy.
-                </li>
-                <li>
-                  Przy dużym powiększeniu pojawia się siatka pomocnicza, która ułatwia liczenie i precyzyjne ustawianie pikseli.
-                </li>
+                {instructionItems.map((item, index) => (
+                  <li key={`instruction-${index}`}>{item}</li>
+                ))}
               </ul>
             </div>
             <PixelCanvas
@@ -192,13 +231,10 @@ function LandingPage() {
         )}
         {selectedPixels.length > 1 && (
           <div className="w-full max-w-2xl rounded-xl border border-blue-500/20 bg-blue-500/5 px-4 py-3 text-center text-sm text-blue-100">
-            Zaznaczono {selectedPixels.length} wolnych pikseli. Dokończ zakup na stronie formularza, aby zarezerwować wszystkie.
+            {t("landing.selection", { count: selectedPixels.length })}
           </div>
         )}
-        <p className="max-w-2xl text-center text-sm text-slate-400">
-          Wskazówki powyżej pomogą Ci szybko odnaleźć się na tablicy — od pojedynczych kliknięć, przez zaznaczanie obszarów,
-          po płynne przesuwanie i precyzyjną pracę na dużym powiększeniu.
-        </p>
+        <p className="max-w-2xl text-center text-sm text-slate-400">{t("landing.tips")}</p>
       </main>
     </div>
   );
@@ -214,6 +250,7 @@ function BuyPixelPage() {
   const { pixelId } = useParams<{ pixelId: string }>();
   const location = useLocation();
   const { ensureAuthenticated, openLoginModal, user, pixelCostPoints, refresh } = useAuth();
+  const { t } = useI18n();
   const singleId = useMemo(() => {
     if (!pixelId) return null;
     const parsed = Number(pixelId);
@@ -263,6 +300,31 @@ function BuyPixelPage() {
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
   const [url, setUrl] = useState("https://example.com");
   const [pixelResults, setPixelResults] = useState<PixelPurchaseResult[]>([]);
+  const pointsShort = t("common.units.pointsShort");
+  const selectedIdsLabel = selectedIds.join(", ");
+  const firstSelectedId = selectedIds[0];
+  const pageTitle = selectedCount > 1 ? t("buy.titleMultiple") : t("buy.titleSingle");
+  const description =
+    selectedCount > 1
+      ? t("buy.descriptionMultiple", { count: selectedCount, ids: selectedIdsLabel })
+      : t("buy.descriptionSingle", {
+          id: typeof firstSelectedId === "number" ? firstSelectedId : t("buy.unknownPixel"),
+        });
+  const costDisplay =
+    typeof pixelCostPoints === "number" && pixelCostPoints > 0
+      ? selectedCount > 1 && totalCost !== null
+        ? t("buy.costBreakdown", {
+            count: selectedCount,
+            price: pixelCostPoints,
+            unit: pointsShort,
+            total: totalCost,
+          })
+        : t("buy.singlePrice", { price: pixelCostPoints })
+      : t("buy.configure");
+  const balanceDisplay =
+    typeof user?.points === "number"
+      ? t("common.units.points", { count: user.points })
+      : t("buy.balanceLogin");
 
   useEffect(() => {
     setSelectedColor("#ff4d4f");
@@ -283,7 +345,7 @@ function BuyPixelPage() {
 
   const handleSimulatePurchase = useCallback(async () => {
     if (selectedIds.length === 0) {
-      setPurchaseError("Wybierz co najmniej jeden piksel, aby kontynuować.");
+      setPurchaseError(t("auth.errors.selectionRequired"));
       return;
     }
 
@@ -294,10 +356,10 @@ function BuyPixelPage() {
 
     try {
       const authenticated = await ensureAuthenticated({
-        message: "Zaloguj się, aby kupić zaznaczone piksele.",
+        message: t("auth.errors.loginToBuyMany"),
       });
       if (!authenticated) {
-        throw new Error("Aby kontynuować, zaloguj się.");
+        throw new Error(t("auth.errors.requiresLogin"));
       }
       const response = await fetch("/api/pixels", {
         method: "POST",
@@ -312,8 +374,8 @@ function BuyPixelPage() {
 
       if (!response.ok) {
         if (response.status === 401) {
-          void openLoginModal({ message: "Zaloguj się ponownie, aby sfinalizować zakup." });
-          throw new Error("Twoja sesja wygasła. Zaloguj się ponownie.");
+          void openLoginModal({ message: t("auth.errors.loginToFinish") });
+          throw new Error(t("auth.errors.sessionExpired"));
         }
         const payload = await response.json().catch(() => null);
         if (payload && Array.isArray((payload as { results?: unknown }).results)) {
@@ -341,10 +403,10 @@ function BuyPixelPage() {
             : null;
         if (response.status === 400 || response.status === 403) {
           throw new Error(
-            apiMessage || "Brak wystarczającej liczby punktów, aby kupić piksel. Aktywuj kod i spróbuj ponownie."
+            apiMessage || t("auth.errors.insufficientPoints")
           );
         }
-        throw new Error(apiMessage || `Błąd API: ${response.status}`);
+        throw new Error(apiMessage || t("auth.errors.api", { status: response.status }));
       }
 
       const payload = (await response.json().catch(() => null)) as
@@ -381,79 +443,48 @@ function BuyPixelPage() {
       } else if (successfulCount > 0) {
         setPurchaseStatus("partial");
         await refresh().catch(() => undefined);
-        setPurchaseError("Nie wszystkie piksele udało się kupić. Sprawdź szczegóły poniżej.");
+        setPurchaseError(t("auth.messages.simulationPartial"));
       } else {
         const errorMessage =
           (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).error === "string"
             ? ((payload as Record<string, unknown>).error as string)
             : null) ||
-          "Nie udało się zarezerwować żadnego z zaznaczonych pikseli. Spróbuj ponownie.";
+          t("auth.errors.purchase");
         setPurchaseError(errorMessage);
       }
     } catch (error) {
       console.error(error);
-      const message = error instanceof Error ? error.message : "Nie udało się zarezerwować piksela. Spróbuj ponownie.";
+      const message = error instanceof Error ? error.message : t("auth.errors.purchase");
       setPurchaseError(message);
     } finally {
       setIsProcessing(false);
     }
-  }, [ensureAuthenticated, openLoginModal, refresh, selectedColor, selectedIds, url]);
+  }, [ensureAuthenticated, openLoginModal, refresh, selectedColor, selectedIds, t, url]);
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center px-6 py-12 text-center">
       <div className="w-full max-w-2xl rounded-3xl bg-slate-900/60 p-10 shadow-xl">
-        <h2 className="text-3xl font-semibold text-blue-400">
-          {selectedCount > 1 ? "Kup wybrane piksele" : "Kup ten piksel"}
-        </h2>
-        <p className="mt-3 text-slate-300">
-          {selectedCount > 1 ? (
-            <>
-              Wybrałeś {selectedCount} wolnych pikseli o ID: {" "}
-              <span className="font-mono text-white">{selectedIds.join(", ")}</span>. Tutaj możesz dobrać kolor i przejść przez
-              fikcyjny proces płatności, aby zobaczyć, jak będzie działał prawdziwy checkout.
-            </>
-          ) : (
-            <>
-              Wybrałeś piksel o ID {" "}
-              <span className="font-mono text-white">{selectedIds[0] ?? "nieznany"}</span>. Tutaj możesz dobrać kolor i przejść
-              przez fikcyjny proces płatności, aby zobaczyć, jak będzie działał prawdziwy checkout.
-            </>
-          )}
-        </p>
+        <h2 className="text-3xl font-semibold text-blue-400">{pageTitle}</h2>
+        <p className="mt-3 text-slate-300">{description}</p>
 
         <div className="mt-6 grid gap-3 text-left text-sm text-slate-300 sm:grid-cols-2">
           <div className="rounded-xl border border-slate-800/70 bg-slate-900/70 p-4">
-            <p className="font-semibold text-slate-100">Koszt zakupu</p>
-            <p className="mt-1 text-slate-300">
-              {typeof pixelCostPoints === "number" && pixelCostPoints > 0 ? (
-                selectedCount > 1 && totalCost !== null ? (
-                  <>
-                    {selectedCount} × {pixelCostPoints} pkt = {totalCost} punktów
-                  </>
-                ) : (
-                  `${pixelCostPoints} punktów`
-                )
-              ) : (
-                "Sprawdź konfigurację"
-              )}
-            </p>
+            <p className="font-semibold text-slate-100">{t("buy.costTitle")}</p>
+            <p className="mt-1 text-slate-300">{costDisplay}</p>
           </div>
           <div className="rounded-xl border border-slate-800/70 bg-slate-900/70 p-4">
-            <p className="font-semibold text-slate-100">Twoje saldo</p>
-            <p className="mt-1 text-slate-300">{typeof user?.points === "number" ? `${user.points} punktów` : "Zaloguj się"}</p>
+            <p className="font-semibold text-slate-100">{t("buy.balanceTitle")}</p>
+            <p className="mt-1 text-slate-300">{balanceDisplay}</p>
           </div>
         </div>
 
         <div className="mt-8 rounded-2xl bg-slate-800/70 p-6 text-left">
-          <h3 className="text-lg font-semibold text-slate-100">Dopasuj swój piksel</h3>
-          <p className="mt-1 text-sm text-slate-400">
-            Wybierz kolor, który najlepiej reprezentuje Twoją markę – podgląd i wartość HEX aktualizują się
-            automatycznie.
-          </p>
+          <h3 className="text-lg font-semibold text-slate-100">{t("buy.matchTitle")}</h3>
+          <p className="mt-1 text-sm text-slate-400">{t("buy.matchDescription")}</p>
 
           <div className="mt-6 flex flex-col gap-6 sm:flex-row sm:items-center">
             <label className="flex flex-col gap-3 text-sm font-medium text-slate-200" htmlFor="pixel-color">
-              Kolor piksela
+              {t("common.labels.pixelColor")}
               <input
                 id="pixel-color"
                 type="color"
@@ -478,19 +509,17 @@ function BuyPixelPage() {
           </div>
 
           <label className="mt-6 flex flex-col gap-2 text-sm font-medium text-slate-200" htmlFor="pixel-url">
-            Adres URL reklamy
+            {t("common.labels.pixelUrl")}
             <input
               id="pixel-url"
               type="url"
               value={url}
               onChange={handleUrlChange}
               disabled={isProcessing}
-              placeholder="https://twoja-domena.pl"
+              placeholder={t("common.placeholders.pixelUrl")}
               className="w-full rounded-lg border border-slate-700 bg-slate-900/80 px-4 py-3 text-sm text-slate-100 shadow-inner placeholder:text-slate-500"
             />
-            <span className="text-xs font-normal text-slate-400">
-              Po kliknięciu w piksel użytkownik zostanie przekierowany pod ten adres.
-            </span>
+            <span className="text-xs font-normal text-slate-400">{t("buy.urlHint")}</span>
           </label>
 
           <button
@@ -502,17 +531,17 @@ function BuyPixelPage() {
             {isProcessing ? (
               <span className="flex items-center gap-3">
                 <span className="h-2 w-2 animate-ping rounded-full bg-white" />
-                Przetwarzanie płatności...
+                {t("common.status.processing")}
               </span>
             ) : (
-              (selectedCount > 1 ? `Zasymuluj zakup ${selectedCount} pikseli` : "Zasymuluj zakup")
+              selectedCount > 1 ? t("buy.simulateMultiple", { count: selectedCount }) : t("buy.simulateSingle")
             )}
           </button>
 
           <p aria-live="polite" className="mt-4 text-sm text-slate-400">
             {isProcessing
-              ? "Trwa wirtualne potwierdzanie płatności. To potrwa tylko chwilkę..."
-              : "Symulacja nie pobiera prawdziwych środków – to jedynie podgląd przyszłego doświadczenia."}
+              ? t("auth.messages.simulationProcessing")
+              : t("auth.messages.simulationInfo")}
           </p>
 
           {purchaseError && (
@@ -522,7 +551,7 @@ function BuyPixelPage() {
           )}
           {pixelResults.length > 0 && (
             <div className="mt-6 rounded-xl border border-slate-700 bg-slate-900/60 p-4">
-              <h4 className="text-sm font-semibold text-slate-200">Rezultaty zakupu</h4>
+              <h4 className="text-sm font-semibold text-slate-200">{t("buy.resultsTitle")}</h4>
               <ul className="mt-3 space-y-2 text-sm text-slate-300">
                 {pixelResults.map((result) => (
                   <li key={result.id} className="flex items-start justify-between gap-4">
@@ -530,7 +559,11 @@ function BuyPixelPage() {
                     {result.error ? (
                       <span className="text-rose-400">{result.error}</span>
                     ) : (
-                      <span className="text-emerald-300">{result.status === "taken" ? "Kupiono" : result.status}</span>
+                      <span className="text-emerald-300">
+                        {result.status && result.status !== "taken"
+                          ? result.status
+                          : t("buy.resultStatus.taken")}
+                      </span>
                     )}
                   </li>
                 ))}
@@ -544,31 +577,27 @@ function BuyPixelPage() {
             role="status"
             className="mt-8 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 p-6 text-left text-emerald-100"
           >
-            <h3 className="text-xl font-semibold text-emerald-300">Udało się!</h3>
+            <h3 className="text-xl font-semibold text-emerald-300">{t("buy.successTitle")}</h3>
             <p className="mt-2 text-sm">
-              {selectedCount > 1 ? (
-                <>
-                  Wszystkie {selectedCount} piksele zostały zarezerwowane z kolorem {" "}
-                  <span className="font-mono">{selectedColor.toUpperCase()}</span>.
-                </>
-              ) : (
-                <>
-                  Piksel <span className="font-mono">#{selectedIds[0]}</span> został zarezerwowany z kolorem {" "}
-                  <span className="font-mono">{selectedColor.toUpperCase()}</span>.
-                </>
-              )}
+              {selectedCount > 1
+                ? t("buy.successDescriptionMultiple", {
+                    count: selectedCount,
+                    color: selectedColor.toUpperCase(),
+                  })
+                : t("buy.successDescriptionSingle", {
+                    id: selectedIds[0] ?? t("buy.unknownPixel"),
+                    color: selectedColor.toUpperCase(),
+                  })}
             </p>
             <div className="mt-4 flex items-center gap-3">
-              <span className="text-sm text-emerald-200">Podgląd:</span>
+              <span className="text-sm text-emerald-200">{t("buy.successPreview")}</span>
               <div
                 aria-hidden
                 className="h-8 w-8 rounded border border-emerald-300 shadow-inner"
                 style={{ backgroundColor: selectedColor }}
               />
             </div>
-            <p className="mt-4 text-xs text-emerald-200/80">
-              To wciąż makieta płatności – w produkcji dodasz prawdziwy checkout oraz potwierdzenia dla klienta.
-            </p>
+            <p className="mt-4 text-xs text-emerald-200/80">{t("buy.successMockInfo")}</p>
           </div>
         )}
         {purchaseStatus === "partial" && (
@@ -576,11 +605,8 @@ function BuyPixelPage() {
             role="status"
             className="mt-8 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-6 text-left text-amber-100"
           >
-            <h3 className="text-xl font-semibold text-amber-200">Częściowy sukces</h3>
-            <p className="mt-2 text-sm">
-              Część pikseli została zakupiona, ale kilka wymaga ponownej próby. Sprawdź szczegóły powyżej i spróbuj ponownie
-              po rozwiązaniu problemów.
-            </p>
+            <h3 className="text-xl font-semibold text-amber-200">{t("buy.partialTitle")}</h3>
+            <p className="mt-2 text-sm">{t("buy.partialDescription")}</p>
           </div>
         )}
 
@@ -589,7 +615,7 @@ function BuyPixelPage() {
             to="/"
             className="inline-flex items-center justify-center rounded-full bg-blue-500 px-6 py-2 font-semibold text-white transition hover:bg-blue-400"
           >
-            Wróć na tablicę
+            {t("buy.return")}
           </Link>
         </div>
       </div>
@@ -609,6 +635,7 @@ function PageLayout({ children, onOpenRegister, onOpenActivationCode }: PageLayo
       <NavigationBar onOpenRegister={onOpenRegister} onOpenActivationCode={onOpenActivationCode} />
       <main className="flex-1">{children}</main>
       <TermsFooter />
+      <CookieConsentBanner />
     </div>
   );
 }
@@ -617,6 +644,7 @@ export default function App() {
   const { openLoginModal, refresh } = useAuth();
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [isActivationModalOpen, setIsActivationModalOpen] = useState(false);
+  const { t } = useI18n();
 
   const handleOpenRegister = useCallback(() => {
     setIsRegisterOpen(true);
@@ -627,8 +655,8 @@ export default function App() {
   }, []);
 
   const handleOpenLoginFromRegister = useCallback(() => {
-    void openLoginModal({ message: "Zaloguj się, aby rozpocząć." });
-  }, [openLoginModal]);
+    void openLoginModal({ message: t("auth.errors.loginToStart") });
+  }, [openLoginModal, t]);
 
   const handleOpenActivationCode = useCallback(() => {
     setIsActivationModalOpen(true);
@@ -674,6 +702,22 @@ export default function App() {
           }
         />
         <Route
+          path="/forgot-password"
+          element={
+            <PageLayout onOpenRegister={handleOpenRegister}>
+              <ForgotPasswordPage />
+            </PageLayout>
+          }
+        />
+        <Route
+          path="/reset-password"
+          element={
+            <PageLayout onOpenRegister={handleOpenRegister}>
+              <ResetPasswordPage />
+            </PageLayout>
+          }
+        />
+        <Route
           path="/buy"
           element={
             <PageLayout onOpenRegister={handleOpenRegister} onOpenActivationCode={handleOpenActivationCode}>
@@ -702,9 +746,9 @@ export default function App() {
           element={
             <PageLayout onOpenRegister={handleOpenRegister}>
               <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-slate-300">
-                <h2 className="text-2xl font-semibold text-white">Ups! Nie znaleziono strony.</h2>
+                <h2 className="text-2xl font-semibold text-white">{t("notFound.title")}</h2>
                 <Link to="/" className="text-blue-400 underline">
-                  Wróć na tablicę pikseli
+                  {t("notFound.cta")}
                 </Link>
               </div>
             </PageLayout>

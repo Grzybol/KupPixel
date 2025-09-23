@@ -7,10 +7,12 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -60,12 +62,21 @@ type Server struct {
 	passwordResetTokenTTL    time.Duration
 	disableVerificationEmail bool
 	pixelCostPoints          int64
+	turnstileSecret          string
+	turnstileVerify          turnstileVerifier
 }
 
 type SessionManager struct {
 	mu       sync.RWMutex
 	sessions map[string]int64
 }
+
+type turnstileResponse struct {
+	Success    bool     `json:"success"`
+	ErrorCodes []string `json:"error-codes"`
+}
+
+type turnstileVerifier func(ctx context.Context, secret, token, remoteIP string) (turnstileResponse, error)
 
 func NewSessionManager() *SessionManager {
 	return &SessionManager{sessions: make(map[string]int64)}
@@ -111,16 +122,24 @@ func (m *SessionManager) Delete(id string) {
 type authRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	Token    string `json:"turnstile_token"`
 }
 
 type passwordResetRequest struct {
 	Email string `json:"email"`
+	Token string `json:"turnstile_token"`
 }
 
 type passwordResetConfirmRequest struct {
 	Token           string `json:"token"`
 	Password        string `json:"password"`
 	ConfirmPassword string `json:"confirm_password"`
+	TurnstileToken  string `json:"turnstile_token"`
+}
+
+type activationCodeRequest struct {
+	Code  string `json:"code"`
+	Token string `json:"turnstile_token"`
 }
 
 type userResponse struct {
@@ -138,9 +157,12 @@ const (
 	defaultVerificationBaseURL = "http://localhost:3000"
 	defaultVerificationTTL     = 24 * time.Hour
 	defaultConfigPath          = "config.json"
+	turnstileVerifyURL         = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 )
 
 var activationCodePattern = regexp.MustCompile(`^[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}$`)
+
+var turnstileHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 func generateSessionID() (string, error) {
 	buf := make([]byte, 32)
@@ -185,6 +207,38 @@ func readSessionCookie(r *http.Request) (string, bool, error) {
 		return "", false, nil
 	}
 	return cookie.Value, true, nil
+}
+
+func defaultTurnstileVerifier(ctx context.Context, secret, token, remoteIP string) (turnstileResponse, error) {
+	form := url.Values{}
+	form.Set("secret", secret)
+	form.Set("response", token)
+	if remoteIP != "" {
+		form.Set("remoteip", remoteIP)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, turnstileVerifyURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return turnstileResponse{}, fmt.Errorf("create turnstile request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := turnstileHTTPClient.Do(req)
+	if err != nil {
+		return turnstileResponse{}, fmt.Errorf("execute turnstile request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return turnstileResponse{}, fmt.Errorf("turnstile verification status %d", resp.StatusCode)
+	}
+
+	var result turnstileResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return turnstileResponse{}, fmt.Errorf("decode turnstile response: %w", err)
+	}
+
+	return result, nil
 }
 
 func sanitizeUser(user storage.User) userResponse {
@@ -337,6 +391,55 @@ func (s *Server) requireUser(c *gin.Context) (storage.User, bool) {
 	return user, true
 }
 
+func extractRemoteIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil {
+		return host
+	}
+	return strings.TrimSpace(r.RemoteAddr)
+}
+
+func (s *Server) requireTurnstile(c *gin.Context, token string) bool {
+	trimmed := strings.TrimSpace(token)
+	if trimmed == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Potwierdź, że nie jesteś robotem."})
+		return false
+	}
+	if strings.TrimSpace(s.turnstileSecret) == "" {
+		log.Printf("turnstile secret key missing in configuration")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Weryfikacja bezpieczeństwa jest chwilowo niedostępna."})
+		return false
+	}
+
+	verifier := s.turnstileVerify
+	if verifier == nil {
+		verifier = defaultTurnstileVerifier
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	remoteIP := extractRemoteIP(c.Request)
+	result, err := verifier(ctx, s.turnstileSecret, trimmed, remoteIP)
+	if err != nil {
+		log.Printf("turnstile verification error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Nie udało się zweryfikować zabezpieczenia. Spróbuj ponownie."})
+		return false
+	}
+	if !result.Success {
+		if len(result.ErrorCodes) > 0 {
+			log.Printf("turnstile verification failed: codes=%v", result.ErrorCodes)
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Nieprawidłowa weryfikacja CAPTCHA."})
+		return false
+	}
+
+	return true
+}
+
 func main() {
 	configPath := os.Getenv("PIXEL_CONFIG_PATH")
 	if configPath == "" {
@@ -436,6 +539,8 @@ func main() {
 		log.Printf("smtp config missing; using console mailer")
 	}
 
+	turnstileSecret := strings.TrimSpace(cfg.TurnstileSecretKey)
+
 	server := &Server{
 		store:                    store,
 		sessions:                 NewSessionManager(),
@@ -446,10 +551,12 @@ func main() {
 		passwordResetTokenTTL:    passwordResetTTL,
 		disableVerificationEmail: cfg.DisableVerificationEmail,
 		pixelCostPoints:          int64(pixelCost),
+		turnstileSecret:          turnstileSecret,
+		turnstileVerify:          defaultTurnstileVerifier,
 	}
 
 	log.Printf(
-		"startup config: config_path=%s storage_backend=%s verification_base_url=%s verification_ttl=%s password_reset_base_url=%s reset_ttl=%s smtp_configured=%t disable_verification_email=%t pixel_cost_points=%d email_language=%s",
+		"startup config: config_path=%s storage_backend=%s verification_base_url=%s verification_ttl=%s password_reset_base_url=%s reset_ttl=%s smtp_configured=%t disable_verification_email=%t pixel_cost_points=%d email_language=%s turnstile_configured=%t",
 		configPath,
 		storeDescription,
 		verificationBaseURL,
@@ -460,6 +567,7 @@ func main() {
 		cfg.DisableVerificationEmail,
 		pixelCost,
 		cfg.Email.Language,
+		turnstileSecret != "",
 	)
 
 	router.POST("/api/register", server.handleRegister)
@@ -514,7 +622,11 @@ func (s *Server) handleRegister(c *gin.Context) {
 		return
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+        if !s.requireTurnstile(c, req.Token) {
+                return
+        }
+
+        hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		log.Printf("hash password: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create user"})
@@ -625,24 +737,28 @@ func (s *Server) handleRegister(c *gin.Context) {
 }
 
 func (s *Server) handleLogin(c *gin.Context) {
-	var req authRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
-		return
+        var req authRequest
+        if err := c.ShouldBindJSON(&req); err != nil {
+                c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+                return
 	}
 
 	email := strings.TrimSpace(strings.ToLower(req.Email))
 	password := strings.TrimSpace(req.Password)
-	if email == "" || password == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "email and password are required"})
-		return
-	}
+        if email == "" || password == "" {
+                c.JSON(http.StatusBadRequest, gin.H{"error": "email and password are required"})
+                return
+        }
 
-	user, err := s.store.GetUserByEmail(c.Request.Context(), email)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
-			return
+        if !s.requireTurnstile(c, req.Token) {
+                return
+        }
+
+        user, err := s.store.GetUserByEmail(c.Request.Context(), email)
+        if err != nil {
+                if errors.Is(err, sql.ErrNoRows) {
+                        c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+                        return
 		}
 		log.Printf("get user: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to login"})
@@ -844,6 +960,10 @@ func (s *Server) handleResendVerification(c *gin.Context) {
 		return
 	}
 
+	if !s.requireTurnstile(c, req.Token) {
+		return
+	}
+
 	user, err := s.store.GetUserByEmail(c.Request.Context(), email)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -890,21 +1010,25 @@ func (s *Server) handleResendVerification(c *gin.Context) {
 }
 
 func (s *Server) handlePasswordResetRequest(c *gin.Context) {
-	var req passwordResetRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
-		return
+        var req passwordResetRequest
+        if err := c.ShouldBindJSON(&req); err != nil {
+                c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+                return
 	}
 
 	email := strings.TrimSpace(strings.ToLower(req.Email))
-	if email == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "email is required"})
-		return
-	}
+        if email == "" {
+                c.JSON(http.StatusBadRequest, gin.H{"error": "email is required"})
+                return
+        }
 
-	const responseMessage = "Jeśli konto istnieje, wysłaliśmy instrukcje resetu hasła."
+        if !s.requireTurnstile(c, req.Token) {
+                return
+        }
 
-	user, err := s.store.GetUserByEmail(c.Request.Context(), email)
+        const responseMessage = "Jeśli konto istnieje, wysłaliśmy instrukcje resetu hasła."
+
+        user, err := s.store.GetUserByEmail(c.Request.Context(), email)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			c.JSON(http.StatusAccepted, gin.H{"message": responseMessage})
@@ -955,6 +1079,10 @@ func (s *Server) handlePasswordResetConfirm(c *gin.Context) {
 
 	if password != confirm {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "hasła muszą być takie same"})
+		return
+	}
+
+	if !s.requireTurnstile(c, req.TurnstileToken) {
 		return
 	}
 
@@ -1052,9 +1180,7 @@ func (s *Server) handleRedeemActivationCode(c *gin.Context) {
 		return
 	}
 
-	var req struct {
-		Code string `json:"code"`
-	}
+	var req activationCodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
@@ -1063,6 +1189,10 @@ func (s *Server) handleRedeemActivationCode(c *gin.Context) {
 	code := strings.ToUpper(strings.TrimSpace(req.Code))
 	if !activationCodePattern.MatchString(code) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "nieprawidłowy format kodu. Użyj xxxx-xxxx-xxxx-xxxx."})
+		return
+	}
+
+	if !s.requireTurnstile(c, req.Token) {
 		return
 	}
 

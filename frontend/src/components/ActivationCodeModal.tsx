@@ -2,6 +2,8 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../useAuth";
 import { isActivationCodeValid, normalizeActivationCode } from "../utils/activationCode";
 import { useI18n } from "../lang/I18nProvider";
+import TurnstileWidget from "./TurnstileWidget";
+import { TURNSTILE_SITE_KEY } from "../config";
 
 type ActivationCodeModalProps = {
   isOpen: boolean;
@@ -24,6 +26,8 @@ export default function ActivationCodeModal({ isOpen, onClose, onSuccess }: Acti
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const { t } = useI18n();
 
   const resetState = useCallback(() => {
@@ -31,6 +35,8 @@ export default function ActivationCodeModal({ isOpen, onClose, onSuccess }: Acti
     setError(null);
     setSuccessMessage(null);
     setIsSubmitting(false);
+    setCaptchaToken("");
+    setCaptchaResetKey((key) => key + 1);
   }, []);
 
   useEffect(() => {
@@ -57,6 +63,10 @@ export default function ActivationCodeModal({ isOpen, onClose, onSuccess }: Acti
         setError(t("auth.errors.activationFormat"));
         return;
       }
+      if (!captchaToken) {
+        setError(t("auth.captcha.required"));
+        return;
+      }
 
       setIsSubmitting(true);
       try {
@@ -66,7 +76,7 @@ export default function ActivationCodeModal({ isOpen, onClose, onSuccess }: Acti
             "Content-Type": "application/json",
           },
           credentials: "include",
-          body: JSON.stringify({ code: normalized }),
+          body: JSON.stringify({ code: normalized, turnstile_token: captchaToken }),
         });
 
         if (!response.ok) {
@@ -103,9 +113,11 @@ export default function ActivationCodeModal({ isOpen, onClose, onSuccess }: Acti
         setError(message);
       } finally {
         setIsSubmitting(false);
+        setCaptchaToken("");
+        setCaptchaResetKey((key) => key + 1);
       }
     },
-    [code, isSubmitting, onSuccess, t]
+    [captchaToken, code, isSubmitting, onSuccess, t]
   );
 
   const infoText = useMemo(() => {
@@ -169,6 +181,21 @@ export default function ActivationCodeModal({ isOpen, onClose, onSuccess }: Acti
               {successMessage}
             </p>
           )}
+
+          <div className="space-y-2">
+            <p className="text-xs text-slate-400">{t("auth.captcha.label")}</p>
+            <TurnstileWidget
+              siteKey={TURNSTILE_SITE_KEY}
+              onTokenChange={setCaptchaToken}
+              onExpire={() => {
+                setCaptchaToken("");
+                setError(t("auth.captcha.required"));
+              }}
+              onError={(message) => setError(message)}
+              resetKey={captchaResetKey}
+              className="mt-1"
+            />
+          </div>
 
           <div className="flex items-center justify-end gap-3 pt-2">
             <button

@@ -146,6 +146,13 @@
         "passwordConfirmationRequired": "Confirm your new password.",
         "passwordMismatch": "The passwords do not match."
       }
+    },
+    "captcha": {
+      "label": "Confirm you're not a robot.",
+      "loading": "Loading challenge...",
+      "error": "We couldn't load the security check. Refresh the page and try again.",
+      "missing": "The security challenge is not configured. Please contact support.",
+      "required": "Please confirm you're not a robot."
     }
   },
   "landing": {
@@ -274,6 +281,13 @@
   "termsFooter": {
     "disclaimer": "Using the service means you accept the terms.",
     "cta": "Read the terms"
+  },
+  "cookies": {
+    "banner": {
+      "message": "We use cookies to remember your preferences and measure traffic.",
+      "accept": "Accept",
+      "moreInfo": "Learn more"
+    }
   },
   "terms": {
     "title": "KupPixel Terms of Service",

@@ -3,6 +3,8 @@
   "pixelCostPoints": 10,
   // Set to true to automatically mark newly created accounts as verified and skip emails.
   "disableVerificationEmail": false,
+  // Secret key used to verify Cloudflare Turnstile challenges on protected forms.
+  "turnstileSecretKey": "",
   "email": {
     // Controls the language used in verification and password reset emails. Supported values: "pl", "en".
     "language": "pl"

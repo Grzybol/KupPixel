@@ -1,7 +1,9 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../useAuth";
 import { useI18n } from "../lang/I18nProvider";
+import TurnstileWidget from "./TurnstileWidget";
+import { TURNSTILE_SITE_KEY } from "../config";
 
 export default function ForgotPasswordPage() {
   const { requestPasswordReset } = useAuth();
@@ -11,15 +13,27 @@ export default function ForgotPasswordPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
+
+  const resetCaptcha = useCallback(() => {
+    setCaptchaToken("");
+    setCaptchaResetKey((key) => key + 1);
+  }, []);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setStatus("idle");
     setError("");
     setMessage("");
+    if (!captchaToken) {
+      setError(t("auth.captcha.required"));
+      setStatus("error");
+      return;
+    }
     setIsSubmitting(true);
     try {
-      const result = await requestPasswordReset(email.trim());
+      const result = await requestPasswordReset({ email: email.trim(), turnstileToken: captchaToken });
       setMessage(result);
       setStatus("success");
     } catch (err) {
@@ -29,6 +43,7 @@ export default function ForgotPasswordPage() {
       setStatus("error");
     } finally {
       setIsSubmitting(false);
+      resetCaptcha();
     }
   };
 
@@ -57,6 +72,25 @@ export default function ForgotPasswordPage() {
               {error}
             </p>
           )}
+
+          <div className="space-y-2">
+            <p className="text-xs text-slate-400">{t("auth.captcha.label")}</p>
+            <TurnstileWidget
+              siteKey={TURNSTILE_SITE_KEY}
+              onTokenChange={setCaptchaToken}
+              onExpire={() => {
+                setCaptchaToken("");
+                setError(t("auth.captcha.required"));
+                setStatus("error");
+              }}
+              onError={(message) => {
+                setError(message);
+                setStatus("error");
+              }}
+              resetKey={captchaResetKey}
+              className="mt-1"
+            />
+          </div>
 
           {status === "success" && message && (
             <div className="rounded-2xl border border-emerald-400/40 bg-emerald-500/10 p-4 text-sm text-emerald-100">

@@ -60,8 +60,9 @@ func TestHandleLogin_UnverifiedResendsVerificationEmail(t *testing.T) {
 		verificationTokenTTL: time.Hour,
 		pixelCostPoints:      10,
 	}
+	enableTurnstileForTest(server)
 
-	body := bytes.NewBufferString(`{"email":"user@example.com","password":"` + testLoginPassword + `"}`)
+	body := bytes.NewBufferString(`{"email":"user@example.com","password":"` + testLoginPassword + `","turnstile_token":"` + testTurnstileToken + `"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/login", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -139,8 +140,9 @@ func TestHandleLogin_UnverifiedWhenVerificationDisabled(t *testing.T) {
 		disableVerificationEmail: true,
 		pixelCostPoints:          10,
 	}
+	enableTurnstileForTest(server)
 
-	body := bytes.NewBufferString(`{"email":"user@example.com","password":"` + testLoginPassword + `"}`)
+	body := bytes.NewBufferString(`{"email":"user@example.com","password":"` + testLoginPassword + `","turnstile_token":"` + testTurnstileToken + `"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/login", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

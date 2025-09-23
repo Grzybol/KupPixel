@@ -6,13 +6,14 @@ import RegisterModal from "./components/RegisterModal";
 import VerifyAccountPage from "./components/VerifyAccountPage";
 import AccountPage from "./components/AccountPage";
 import ActivationCodeModal from "./components/ActivationCodeModal";
-import TermsFooter from "./components/TermsFooter";
 import NavigationBar from "./components/NavigationBar";
 import TermsPage from "./components/TermsPage";
 import ForgotPasswordPage from "./components/ForgotPasswordPage";
 import ResetPasswordPage from "./components/ResetPasswordPage";
 import { useAuth } from "./useAuth";
 import { useI18n } from "./lang/I18nProvider";
+import TermsFooter from "./components/TermsFooter";
+import CookieConsentBanner from "./components/CookieConsentBanner";
 
 type PixelResponse = {
   width: number;
@@ -634,6 +635,7 @@ function PageLayout({ children, onOpenRegister, onOpenActivationCode }: PageLayo
       <NavigationBar onOpenRegister={onOpenRegister} onOpenActivationCode={onOpenActivationCode} />
       <main className="flex-1">{children}</main>
       <TermsFooter />
+      <CookieConsentBanner />
     </div>
   );
 }

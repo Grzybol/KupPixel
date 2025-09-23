@@ -102,7 +102,7 @@ func prepareStore(t *testing.T, store storage.Store) {
 
 func newTestServer(t *testing.T, store storage.Store) *Server {
 	t.Helper()
-	return &Server{
+	server := &Server{
 		store:                store,
 		sessions:             NewSessionManager(),
 		mailer:               &fakeMailer{},
@@ -110,6 +110,8 @@ func newTestServer(t *testing.T, store storage.Store) *Server {
 		verificationTokenTTL: time.Hour,
 		pixelCostPoints:      10,
 	}
+	enableTurnstileForTest(server)
+	return server
 }
 
 func mysqlContainerDSN(t *testing.T) string {
@@ -139,7 +141,7 @@ func TestHandleRedeemActivationCode_Success(t *testing.T) {
 			t.Fatalf("create session: %v", err)
 		}
 
-		body := bytes.NewBufferString(`{"code":"ABCD-EFGH-IJKL-MNOP"}`)
+		body := bytes.NewBufferString(`{"code":"ABCD-EFGH-IJKL-MNOP","turnstile_token":"` + testTurnstileToken + `"}`)
 		req := httptest.NewRequest(http.MethodPost, "/api/activation-codes/redeem", body)
 		req.Header.Set("Content-Type", "application/json")
 		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionID})
@@ -215,7 +217,7 @@ func TestHandleUpdatePixelRequiresPoints(t *testing.T) {
 			t.Fatalf("create activation code: %v", err)
 		}
 
-		redeemBody := bytes.NewBufferString(`{"code":"WXYZ-1234-5678-90AB"}`)
+		redeemBody := bytes.NewBufferString(`{"code":"WXYZ-1234-5678-90AB","turnstile_token":"` + testTurnstileToken + `"}`)
 		redeemReq := httptest.NewRequest(http.MethodPost, "/api/activation-codes/redeem", redeemBody)
 		redeemReq.Header.Set("Content-Type", "application/json")
 		redeemReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionID})
@@ -280,7 +282,7 @@ func TestHandleUpdatePixelMultiplePurchase(t *testing.T) {
 			t.Fatalf("create activation code: %v", err)
 		}
 
-		redeemBody := bytes.NewBufferString(`{"code":"MULT-TEST-CODE-0001"}`)
+		redeemBody := bytes.NewBufferString(`{"code":"MULT-TEST-CODE-0001","turnstile_token":"` + testTurnstileToken + `"}`)
 		redeemReq := httptest.NewRequest(http.MethodPost, "/api/activation-codes/redeem", redeemBody)
 		redeemReq.Header.Set("Content-Type", "application/json")
 		redeemReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionID})

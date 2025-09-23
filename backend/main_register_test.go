@@ -63,8 +63,9 @@ func TestHandleRegister_DisableVerificationEmail(t *testing.T) {
 		disableVerificationEmail: true,
 		pixelCostPoints:          10,
 	}
+	enableTurnstileForTest(server)
 
-	body := bytes.NewBufferString(`{"email":"user@example.com","password":"strong"}`)
+	body := bytes.NewBufferString(`{"email":"user@example.com","password":"strong","turnstile_token":"` + testTurnstileToken + `"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/register", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -115,8 +116,9 @@ func TestHandleRegister_ExistingUnverifiedResendsEmail(t *testing.T) {
 		verificationTokenTTL: time.Hour,
 		pixelCostPoints:      10,
 	}
+	enableTurnstileForTest(server)
 
-	body := bytes.NewBufferString(`{"email":"user@example.com","password":"strong"}`)
+	body := bytes.NewBufferString(`{"email":"user@example.com","password":"strong","turnstile_token":"` + testTurnstileToken + `"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/register", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -189,8 +191,9 @@ func TestHandleRegister_ExistingVerifiedConflict(t *testing.T) {
 		verificationTokenTTL: time.Hour,
 		pixelCostPoints:      10,
 	}
+	enableTurnstileForTest(server)
 
-	body := bytes.NewBufferString(`{"email":"user@example.com","password":"strong"}`)
+	body := bytes.NewBufferString(`{"email":"user@example.com","password":"strong","turnstile_token":"` + testTurnstileToken + `"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/register", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

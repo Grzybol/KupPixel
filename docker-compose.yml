@@ -5,15 +5,16 @@ services:
     build:
       context: .
       args:
-        VITE_TURNSTILE_SITE_KEY: ${VITE_TURNSTILE_SITE_KEY:?Set VITE_TURNSTILE_SITE_KEY to your public Cloudflare Turnstile site key}
-    ports:
-      - "3000:3000"
+        VITE_TURNSTILE_SITE_KEY: ${VITE_TURNSTILE_SITE_KEY}
+      #ports:
+      # - "3000:3000"
     environment:
       - NODE_ENV=production
-    restart: unless-stopped
+    network_mode: host
     volumes:
       - pixel-data:/app/data
       - ./backend/config.json:/app/config.json:ro
+    restart: unless-stopped
 
 volumes:
   pixel-data:

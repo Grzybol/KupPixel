@@ -28,7 +28,7 @@ Każdy piksel można kliknąć, zobaczyć czy jest wolny czy zajęty i w przysz�
 - **Backend**: Go (Gin framework) – API REST do obsługi pikseli
 - **Baza danych**: SQLite (plik tworzony domyślnie pod `backend/data/pixels.db`, można zmienić ścieżkę zmienną `PIXEL_DB_PATH`)
 - **Docker**: multi-stage build → jeden image z frontendem i backendem
-- **Nginx/Reverse Proxy**: opcjonalnie do hostingu na VPS + SSL
+- **Nginx/Reverse Proxy**: opcjonalnie do hostingu na VPS + SSL (konfiguracja produkcyjna w `infra/nginx/nginx.conf`)
 
 ### ✉️ Konfiguracja backendu
 

@@ -395,11 +395,72 @@ func extractRemoteIP(r *http.Request) string {
 	if r == nil {
 		return ""
 	}
-	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
-	if err == nil {
-		return host
+
+	proxyHeaders := []string{"CF-Connecting-IP", "X-Forwarded-For", "X-Real-IP"}
+	for _, header := range proxyHeaders {
+		for _, value := range r.Header.Values(header) {
+			parts := strings.Split(value, ",")
+			for _, part := range parts {
+				candidate := strings.TrimSpace(part)
+				if candidate == "" {
+					continue
+				}
+				if ip := normalizeIP(candidate); ip != "" {
+					return ip
+				}
+			}
+		}
 	}
-	return strings.TrimSpace(r.RemoteAddr)
+
+	remoteAddr := strings.TrimSpace(r.RemoteAddr)
+	if remoteAddr == "" {
+		return ""
+	}
+
+	host := remoteAddr
+	if splitHost, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		host = splitHost
+	}
+
+	return normalizeIP(host)
+}
+
+func normalizeIP(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+
+	if ip := net.ParseIP(trimmed); isPublicIP(ip) {
+		return trimmed
+	}
+
+	if host, _, err := net.SplitHostPort(trimmed); err == nil {
+		host = strings.TrimSpace(host)
+		if ip := net.ParseIP(host); isPublicIP(ip) {
+			return host
+		}
+	}
+
+	return ""
+}
+
+func isPublicIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+
+	if ip.IsPrivate() || ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return false
+	}
+
+	if ip4 := ip.To4(); ip4 != nil {
+		if ip4[0] == 100 && ip4[1]&0xC0 == 0x40 { // 100.64.0.0/10 (CGNAT)
+			return false
+		}
+	}
+
+	return true
 }
 
 func (s *Server) requireTurnstile(c *gin.Context, token string) bool {
@@ -622,11 +683,11 @@ func (s *Server) handleRegister(c *gin.Context) {
 		return
 	}
 
-        if !s.requireTurnstile(c, req.Token) {
-                return
-        }
+	if !s.requireTurnstile(c, req.Token) {
+		return
+	}
 
-        hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		log.Printf("hash password: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create user"})
@@ -737,28 +798,28 @@ func (s *Server) handleRegister(c *gin.Context) {
 }
 
 func (s *Server) handleLogin(c *gin.Context) {
-        var req authRequest
-        if err := c.ShouldBindJSON(&req); err != nil {
-                c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
-                return
+	var req authRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
 	}
 
 	email := strings.TrimSpace(strings.ToLower(req.Email))
 	password := strings.TrimSpace(req.Password)
-        if email == "" || password == "" {
-                c.JSON(http.StatusBadRequest, gin.H{"error": "email and password are required"})
-                return
-        }
+	if email == "" || password == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "email and password are required"})
+		return
+	}
 
-        if !s.requireTurnstile(c, req.Token) {
-                return
-        }
+	if !s.requireTurnstile(c, req.Token) {
+		return
+	}
 
-        user, err := s.store.GetUserByEmail(c.Request.Context(), email)
-        if err != nil {
-                if errors.Is(err, sql.ErrNoRows) {
-                        c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
-                        return
+	user, err := s.store.GetUserByEmail(c.Request.Context(), email)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+			return
 		}
 		log.Printf("get user: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to login"})
@@ -1010,25 +1071,25 @@ func (s *Server) handleResendVerification(c *gin.Context) {
 }
 
 func (s *Server) handlePasswordResetRequest(c *gin.Context) {
-        var req passwordResetRequest
-        if err := c.ShouldBindJSON(&req); err != nil {
-                c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
-                return
+	var req passwordResetRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
 	}
 
 	email := strings.TrimSpace(strings.ToLower(req.Email))
-        if email == "" {
-                c.JSON(http.StatusBadRequest, gin.H{"error": "email is required"})
-                return
-        }
+	if email == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "email is required"})
+		return
+	}
 
-        if !s.requireTurnstile(c, req.Token) {
-                return
-        }
+	if !s.requireTurnstile(c, req.Token) {
+		return
+	}
 
-        const responseMessage = "Jeśli konto istnieje, wysłaliśmy instrukcje resetu hasła."
+	const responseMessage = "Jeśli konto istnieje, wysłaliśmy instrukcje resetu hasła."
 
-        user, err := s.store.GetUserByEmail(c.Request.Context(), email)
+	user, err := s.store.GetUserByEmail(c.Request.Context(), email)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			c.JSON(http.StatusAccepted, gin.H{"message": responseMessage})

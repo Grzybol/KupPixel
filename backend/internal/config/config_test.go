@@ -129,6 +129,20 @@ func TestLoad_CustomVerificationTTL(t *testing.T) {
 	}
 }
 
+func TestLoad_VerificationBaseURLTrimmed(t *testing.T) {
+	path := writeTempConfig(t, `{
+                "verification": {"baseUrl": " https://example.com/verify "}
+        }`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.Verification.BaseURL != "https://example.com/verify" {
+		t.Fatalf("expected verification base url trimmed, got %q", cfg.Verification.BaseURL)
+	}
+}
+
 func TestLoad_MissingPath(t *testing.T) {
 	if _, err := Load(" "); err == nil {
 		t.Fatal("expected error for empty path")

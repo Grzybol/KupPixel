@@ -16,6 +16,7 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
   const { register } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -35,6 +36,7 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
   const resetState = useCallback(() => {
     setEmail("");
     setPassword("");
+    setConfirmPassword("");
     setAcceptedTerms(false);
     setError(null);
     setIsSubmitting(false);
@@ -57,14 +59,24 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
         setError(t("auth.messages.registerTermsError"));
         return;
       }
+      if (password !== confirmPassword) {
+        setError(t("auth.errors.passwordMismatch"));
+        return;
+      }
       if (!captchaToken) {
         setError(t("auth.captcha.required"));
         return;
       }
       setIsSubmitting(true);
       try {
-        const result = await register({ email, password, turnstileToken: captchaToken });
+        const result = await register({
+          email,
+          password,
+          confirmPassword,
+          turnstileToken: captchaToken,
+        });
         setPassword("");
+        setConfirmPassword("");
         setIsSuccess(true);
         setSuccessMessage(result.message);
       } catch (err) {
@@ -162,6 +174,19 @@ export default function RegisterModal({ isOpen, onClose, onOpenLogin }: Register
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
+                className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-900/70 px-4 py-3 text-slate-100 shadow-inner focus:border-blue-400 focus:outline-none"
+                autoComplete="new-password"
+                required
+                disabled={isSubmitting}
+              />
+            </label>
+
+            <label className="block text-sm font-medium text-slate-200">
+              {t("common.labels.confirmPassword")}
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
                 className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-900/70 px-4 py-3 text-slate-100 shadow-inner focus:border-blue-400 focus:outline-none"
                 autoComplete="new-password"
                 required

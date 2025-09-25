@@ -1,5 +1,7 @@
 import { FormEvent, useCallback, useEffect, useId, useState } from "react";
 import { useI18n } from "../lang/I18nProvider";
+import TurnstileWidget from "./TurnstileWidget";
+import { TURNSTILE_SITE_KEY } from "../config";
 
 type ResendVerificationFormProps = {
   initialEmail?: string;
@@ -11,6 +13,8 @@ export default function ResendVerificationForm({ initialEmail = "", className }:
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const inputId = useId();
   const { t } = useI18n();
 
@@ -18,11 +22,20 @@ export default function ResendVerificationForm({ initialEmail = "", className }:
     setEmail(initialEmail);
   }, [initialEmail]);
 
+  const resetCaptcha = useCallback(() => {
+    setCaptchaToken("");
+    setCaptchaResetKey((key) => key + 1);
+  }, []);
+
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       setError(null);
       setSuccess(null);
+      if (!captchaToken) {
+        setError(t("auth.captcha.required"));
+        return;
+      }
       setIsSubmitting(true);
       try {
         const response = await fetch("/api/resend-verification", {
@@ -31,14 +44,14 @@ export default function ResendVerificationForm({ initialEmail = "", className }:
             "Content-Type": "application/json",
           },
           credentials: "include",
-          body: JSON.stringify({ email }),
+          body: JSON.stringify({ email, turnstile_token: captchaToken }),
         });
         const payload = await response.json().catch(() => null);
         if (!response.ok) {
-        const message =
-          (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).error === "string"
-            ? ((payload as Record<string, unknown>).error as string)
-            : null) || t("auth.errors.resend");
+          const message =
+            (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).error === "string"
+              ? ((payload as Record<string, unknown>).error as string)
+              : null) || t("auth.errors.resend");
           throw new Error(message);
         }
         const message =
@@ -52,9 +65,10 @@ export default function ResendVerificationForm({ initialEmail = "", className }:
         setError(message);
       } finally {
         setIsSubmitting(false);
+        resetCaptcha();
       }
     },
-    [email, t]
+    [captchaToken, email, resetCaptcha, t]
   );
 
   return (
@@ -86,6 +100,22 @@ export default function ResendVerificationForm({ initialEmail = "", className }:
           {success}
         </p>
       )}
+      <div className="space-y-2">
+        <p className="text-xs text-slate-400">{t("auth.captcha.label")}</p>
+        <TurnstileWidget
+          siteKey={TURNSTILE_SITE_KEY}
+          onTokenChange={(token) => {
+            setCaptchaToken(token);
+            setError(null);
+          }}
+          onExpire={() => {
+            setCaptchaToken("");
+            setError(t("auth.captcha.required"));
+          }}
+          onError={(message) => setError(message)}
+          resetKey={captchaResetKey}
+        />
+      </div>
       <div className="flex justify-end">
         <button
           type="submit"

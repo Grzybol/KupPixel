@@ -28,6 +28,7 @@ type LoginCredentials = {
 type RegisterCredentials = {
   email: string;
   password: string;
+  confirmPassword: string;
   turnstileToken: string;
 };
 
@@ -230,6 +231,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const register = useCallback(
     async (credentials: RegisterCredentials): Promise<RegisterResult> => {
+      if (credentials.password !== credentials.confirmPassword) {
+        throw new Error(t("auth.errors.passwordMismatch"));
+      }
       const response = await fetch("/api/register", {
         method: "POST",
         headers: {
@@ -239,6 +243,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         body: JSON.stringify({
           email: credentials.email,
           password: credentials.password,
+          confirm_password: credentials.confirmPassword,
           turnstile_token: credentials.turnstileToken,
         }),
       });

@@ -331,3 +331,154 @@ func TestHandleUpdatePixelMultiplePurchase(t *testing.T) {
 		}
 	})
 }
+
+func TestHandleUpdatePixelURLBlacklist(t *testing.T) {
+	runStoreTests(t, func(t *testing.T, server *Server, store storage.Store) {
+		server.pixelURLBlacklist = []string{"pornhub.com", "forbidden"}
+
+		user, err := store.CreateUser(context.Background(), "block@example.com", "hash")
+		if err != nil {
+			t.Fatalf("create user: %v", err)
+		}
+
+		if err := store.CreateActivationCode(context.Background(), "BLCK-URLX-TEST-0001", 40); err != nil {
+			t.Fatalf("create activation code: %v", err)
+		}
+
+		sessionID, err := server.sessions.Create(user.ID)
+		if err != nil {
+			t.Fatalf("create session: %v", err)
+		}
+
+		redeemBody := bytes.NewBufferString(`{"code":"BLCK-URLX-TEST-0001","turnstile_token":"` + testTurnstileToken + `"}`)
+		redeemReq := httptest.NewRequest(http.MethodPost, "/api/activation-codes/redeem", redeemBody)
+		redeemReq.Header.Set("Content-Type", "application/json")
+		redeemReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionID})
+		redeemW := httptest.NewRecorder()
+		redeemCtx := &gin.Context{Writer: redeemW, Request: redeemReq}
+		server.handleRedeemActivationCode(redeemCtx)
+		if redeemW.Code != http.StatusOK {
+			t.Fatalf("expected redeem status 200, got %d body=%s", redeemW.Code, redeemW.Body.String())
+		}
+
+		checkUser := func(expectedPoints int64) {
+			refreshed, err := store.GetUserByID(context.Background(), user.ID)
+			if err != nil {
+				t.Fatalf("get user: %v", err)
+			}
+			if refreshed.Points != expectedPoints {
+				t.Fatalf("expected user points %d, got %d", expectedPoints, refreshed.Points)
+			}
+		}
+
+		assertNoPixelsOwned := func() {
+			pixels, err := store.GetPixelsByOwner(context.Background(), user.ID)
+			if err != nil {
+				t.Fatalf("get pixels by owner: %v", err)
+			}
+			if len(pixels) != 0 {
+				t.Fatalf("expected no owned pixels, got %d", len(pixels))
+			}
+		}
+
+		// Blocked by domain equality
+		blockedDomainBody := bytes.NewBufferString(`{"pixels":[{"id":1,"status":"taken","color":"#ffffff","url":"https://pornhub.com"}]}`)
+		blockedDomainReq := httptest.NewRequest(http.MethodPost, "/api/pixels", blockedDomainBody)
+		blockedDomainReq.Header.Set("Content-Type", "application/json")
+		blockedDomainReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionID})
+		blockedDomainW := httptest.NewRecorder()
+		blockedDomainCtx := &gin.Context{Writer: blockedDomainW, Request: blockedDomainReq}
+		server.handleUpdatePixel(blockedDomainCtx)
+
+		if blockedDomainW.Code != http.StatusBadRequest {
+			t.Fatalf("expected status 400 for blocked domain, got %d", blockedDomainW.Code)
+		}
+
+		var blockedDomainResp updatePixelResponse
+		if err := json.Unmarshal(blockedDomainW.Body.Bytes(), &blockedDomainResp); err != nil {
+			t.Fatalf("unmarshal blocked domain response: %v", err)
+		}
+
+		if len(blockedDomainResp.Results) != 1 {
+			t.Fatalf("expected 1 blocked domain result, got %d", len(blockedDomainResp.Results))
+		}
+		if blockedDomainResp.Results[0].Pixel != nil {
+			t.Fatalf("expected no pixel payload for blocked domain")
+		}
+		if !strings.Contains(blockedDomainResp.Results[0].Error, "blocked") {
+			t.Fatalf("expected blocked domain error, got %s", blockedDomainResp.Results[0].Error)
+		}
+		checkUser(40)
+		assertNoPixelsOwned()
+
+		// Blocked by keyword substring
+		blockedKeywordBody := bytes.NewBufferString(`{"pixels":[{"id":1,"status":"taken","color":"#000000","url":"https://example.com/forbidden-content"}]}`)
+		blockedKeywordReq := httptest.NewRequest(http.MethodPost, "/api/pixels", blockedKeywordBody)
+		blockedKeywordReq.Header.Set("Content-Type", "application/json")
+		blockedKeywordReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionID})
+		blockedKeywordW := httptest.NewRecorder()
+		blockedKeywordCtx := &gin.Context{Writer: blockedKeywordW, Request: blockedKeywordReq}
+		server.handleUpdatePixel(blockedKeywordCtx)
+
+		if blockedKeywordW.Code != http.StatusBadRequest {
+			t.Fatalf("expected status 400 for blocked keyword, got %d", blockedKeywordW.Code)
+		}
+
+		var blockedKeywordResp updatePixelResponse
+		if err := json.Unmarshal(blockedKeywordW.Body.Bytes(), &blockedKeywordResp); err != nil {
+			t.Fatalf("unmarshal blocked keyword response: %v", err)
+		}
+
+		if len(blockedKeywordResp.Results) != 1 {
+			t.Fatalf("expected 1 blocked keyword result, got %d", len(blockedKeywordResp.Results))
+		}
+		if blockedKeywordResp.Results[0].Pixel != nil {
+			t.Fatalf("expected no pixel payload for blocked keyword")
+		}
+		if !strings.Contains(blockedKeywordResp.Results[0].Error, "blocked") {
+			t.Fatalf("expected blocked keyword error, got %s", blockedKeywordResp.Results[0].Error)
+		}
+		checkUser(40)
+		assertNoPixelsOwned()
+
+		// Allowed purchase after blocked attempts
+		allowedBody := bytes.NewBufferString(`{"pixels":[{"id":1,"status":"taken","color":"#123456","url":"https://example.com/allowed"}]}`)
+		allowedReq := httptest.NewRequest(http.MethodPost, "/api/pixels", allowedBody)
+		allowedReq.Header.Set("Content-Type", "application/json")
+		allowedReq.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionID})
+		allowedW := httptest.NewRecorder()
+		allowedCtx := &gin.Context{Writer: allowedW, Request: allowedReq}
+		server.handleUpdatePixel(allowedCtx)
+
+		if allowedW.Code != http.StatusOK {
+			t.Fatalf("expected status 200 for allowed url, got %d", allowedW.Code)
+		}
+
+		var allowedResp updatePixelResponse
+		if err := json.Unmarshal(allowedW.Body.Bytes(), &allowedResp); err != nil {
+			t.Fatalf("unmarshal allowed response: %v", err)
+		}
+		if len(allowedResp.Results) != 1 {
+			t.Fatalf("expected 1 allowed result, got %d", len(allowedResp.Results))
+		}
+		if allowedResp.Results[0].Pixel == nil {
+			t.Fatalf("expected pixel payload for allowed url")
+		}
+		if allowedResp.Results[0].Pixel.Status != "taken" {
+			t.Fatalf("expected pixel status taken, got %s", allowedResp.Results[0].Pixel.Status)
+		}
+
+		checkUser(30)
+
+		ownedPixels, err := store.GetPixelsByOwner(context.Background(), user.ID)
+		if err != nil {
+			t.Fatalf("get pixels by owner after allowed: %v", err)
+		}
+		if len(ownedPixels) != 1 {
+			t.Fatalf("expected 1 owned pixel after allowed purchase, got %d", len(ownedPixels))
+		}
+		if ownedPixels[0].ID != 1 {
+			t.Fatalf("expected owned pixel id 1, got %d", ownedPixels[0].ID)
+		}
+	})
+}

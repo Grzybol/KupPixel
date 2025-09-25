@@ -37,7 +37,8 @@ type PasswordReset struct {
 
 // Verification holds configuration for verification tokens and links.
 type Verification struct {
-	TokenTTLHours int `json:"tokenTtlHours"`
+	TokenTTLHours int    `json:"tokenTtlHours"`
+	BaseURL       string `json:"baseUrl"`
 }
 
 // DatabaseConfig encapsulates storage backend configuration.
@@ -162,6 +163,7 @@ func Load(path string) (*Config, error) {
 	if cfg.Verification.TokenTTLHours <= 0 {
 		cfg.Verification.TokenTTLHours = Default().Verification.TokenTTLHours
 	}
+	cfg.Verification.BaseURL = strings.TrimSpace(cfg.Verification.BaseURL)
 
 	if cfg.Database == nil {
 		cfg.Database = defaultDatabaseConfig()

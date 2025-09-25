@@ -10,6 +10,8 @@
     "language": "pl"
   },
   "verification": {
+    // Base URL used to construct verification links (fallbacks to VERIFICATION_LINK_BASE_URL or default http://localhost:3000).
+    "baseUrl": "http://localhost:3000",
     // Verification token time to live in hours.
     "tokenTtlHours": 24
   },

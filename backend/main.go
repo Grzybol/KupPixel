@@ -766,6 +766,9 @@ func main() {
 	router := gin.Default()
 	verificationBaseURL := strings.TrimSpace(os.Getenv("VERIFICATION_LINK_BASE_URL"))
 	if verificationBaseURL == "" {
+		verificationBaseURL = strings.TrimSpace(cfg.Verification.BaseURL)
+	}
+	if verificationBaseURL == "" {
 		verificationBaseURL = defaultVerificationBaseURL
 	}
 

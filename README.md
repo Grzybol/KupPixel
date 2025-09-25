@@ -54,8 +54,27 @@ Aby formularze mogły wyświetlać widżet Cloudflare Turnstile, należy skonfig
 
 - **Frontend** oczekuje klucza publicznego w zmiennej `VITE_TURNSTILE_SITE_KEY`. Najprościej jest skopiować plik `frontend/.env.example` do `frontend/.env` i podmienić wartość na klucz z panelu Cloudflare. W przypadku budowania obrazu Dockera zmienna jest przekazywana jako argument `VITE_TURNSTILE_SITE_KEY`.
 - **Backend** używa sekretu z pola `turnstileSecretKey` w pliku `config.json`. Wartość ta musi odpowiadać sekretowi wygenerowanemu dla tej samej witryny w Cloudflare, co klucz publiczny z frontendu.
+- Dodatkowo można ustawić `VITE_TURNSTILE_DEBUG=true`, aby przesyłać szczegółowe zdarzenia debugujące widżetu do backendu (wysyłane są one na endpoint `/api/debug/turnstile`).
 
 Brak którejkolwiek z powyższych wartości uniemożliwi poprawne działanie weryfikacji CAPTCHA.
+
+### 📡 Logowanie do Elastic
+
+Backend potrafi buforować logi i wysyłać je do klastra ElasticSearch poprzez API bulk. Konfiguracja odbywa się przez zmienne środowiskowe:
+
+| Zmienna | Domyślna wartość | Opis |
+| --- | --- | --- |
+| `ELASTIC_URL` | `https://127.0.0.1:9200` | Adres klastra ElasticSearch. |
+| `ELASTIC_INDEX` | `website-backend` | Nazwa indeksu, do którego trafiają logi. |
+| `ELASTIC_API_KEY` | _(brak)_ | Wymagany klucz API (bez niego logowanie jest wyłączone). |
+| `ELASTIC_VERIFY_CERT` | `false` | Czy weryfikować certyfikat TLS (przy self-signed ustaw na `false`). |
+| `ELASTIC_CA_PATH` | _(brak)_ | Ścieżka do pliku CA, jeżeli `ELASTIC_VERIFY_CERT=true`. |
+| `ELASTIC_FLUSH_MS` | `60000` | Odstęp między cyklicznymi flushami bufora (w milisekundach). |
+| `ELASTIC_MAX_BUFFER` | `2000` | Maksymalna liczba wpisów w buforze przed wymuszeniem flush. |
+| `ELASTIC_MAX_BYTES` | `5242880` | Maksymalny rozmiar bufora (w bajtach). |
+| `ELASTIC_MAX_RETRIES` | `3` | Liczba ponowień wysyłki przy błędach 429/5xx. |
+
+Klucz API warto przechowywać w pliku `.env` (np. `ELASTIC_API_KEY=xxxx`) lub w menedżerze sekretów i przekazywać go do kontenera. Logger rejestruje zdarzenia lokalnie na stderr oraz wysyła je do Elastica – przy zakończeniu procesu bufor jest automatycznie flushowany.
 
 ### 💾 Przechowywanie danych backendu
 

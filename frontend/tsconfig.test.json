@@ -11,6 +11,12 @@
     "declaration": false,
     "skipLibCheck": true
   },
-  "include": ["tests/**/*.ts", "src/utils/**/*.ts"],
+  "include": [
+    "tests/**/*.ts",
+    "src/utils/**/*.ts",
+    "src/lang/**/*.ts",
+    "src/lang/**/*.tsx",
+    "src/useAuth.tsx"
+  ],
   "exclude": ["dist", "dist-tests", "node_modules"]
 }

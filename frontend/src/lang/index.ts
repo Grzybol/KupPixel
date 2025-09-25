@@ -1,5 +1,5 @@
-import en from "./en.json";
-import pl from "./pl.json";
+import en from "./en.json" with { type: "json" };
+import pl from "./pl.json" with { type: "json" };
 
 export type TranslationValue = string | TranslationDictionary | TranslationValue[];
 export type TranslationDictionary = { [key: string]: TranslationValue };

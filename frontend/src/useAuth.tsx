@@ -79,11 +79,12 @@ export function parseUser(data: unknown): AuthUser | null {
   }
   if ("user" in data) {
     const nested = (data as Record<string, unknown>).user;
-    if (nested !== null && typeof nested === "object") {
-      const record = nested as Record<string, unknown>;
-      if ("email" in record && typeof record.email === "string") {
-        return record as AuthUser;
-      }
+    if (!nested || typeof nested !== "object") {
+      return null;
+    }
+    const record = nested as Record<string, unknown>;
+    if ("email" in record && typeof record.email === "string") {
+      return record as AuthUser;
     }
     return null;
   }

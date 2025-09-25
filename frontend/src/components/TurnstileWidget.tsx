@@ -28,9 +28,14 @@ export default function TurnstileWidget({
   const onTokenChangeRef = useRef(onTokenChange);
   const onErrorRef = useRef<TurnstileWidgetProps["onError"] | null>(onError ?? null);
   const onExpireRef = useRef<TurnstileWidgetProps["onExpire"] | null>(onExpire ?? null);
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const [state, setState] = useState<LoadState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const translateRef = useRef(t);
+
+  useEffect(() => {
+    translateRef.current = t;
+  }, [t]);
 
   useEffect(() => {
     onTokenChangeRef.current = onTokenChange;
@@ -49,8 +54,10 @@ export default function TurnstileWidget({
 
     onTokenChangeRef.current("");
 
+    const translate = translateRef.current;
+
     if (!siteKey) {
-      const message = t("auth.captcha.missing");
+      const message = translate("auth.captcha.missing");
       setState("error");
       setErrorMessage(message);
       onErrorRef.current?.(message);
@@ -68,7 +75,7 @@ export default function TurnstileWidget({
           return;
         }
         if (!containerRef.current || !window.turnstile) {
-          const message = t("auth.captcha.error");
+          const message = translate("auth.captcha.error");
           setState("error");
           setErrorMessage(message);
           onErrorRef.current?.(message);
@@ -94,7 +101,7 @@ export default function TurnstileWidget({
               onExpireRef.current?.();
             },
             "error-callback": () => {
-              const message = t("auth.captcha.error");
+              const message = translate("auth.captcha.error");
               setState("error");
               setErrorMessage(message);
               onErrorRef.current?.(message);
@@ -104,7 +111,7 @@ export default function TurnstileWidget({
           setState("ready");
         } catch (error) {
           console.error("turnstile render", error);
-          const message = t("auth.captcha.error");
+          const message = translate("auth.captcha.error");
           setState("error");
           setErrorMessage(message);
           onErrorRef.current?.(message);
@@ -116,7 +123,7 @@ export default function TurnstileWidget({
           return;
         }
         console.error("turnstile load", error);
-        const message = t("auth.captcha.error");
+        const message = translate("auth.captcha.error");
         setState("error");
         setErrorMessage(message);
         onErrorRef.current?.(message);
@@ -135,7 +142,7 @@ export default function TurnstileWidget({
       }
       widgetIdRef.current = null;
     };
-  }, [siteKey, action, resetKey, t]);
+  }, [siteKey, action, resetKey, language]);
 
   return (
     <div className={className}>

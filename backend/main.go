@@ -69,6 +69,7 @@ type Server struct {
 	turnstileVerify          turnstileVerifier
 	logger                   *elastic.Logger
 	stdlog                   *log.Logger
+	pixelURLBlacklist        []string
 }
 
 type SessionManager struct {
@@ -831,6 +832,7 @@ func main() {
 		turnstileVerify:          defaultTurnstileVerifier,
 		logger:                   elasticLogger,
 		stdlog:                   log.New(os.Stderr, "", log.LstdFlags),
+		pixelURLBlacklist:        cfg.PixelURLBlacklist,
 	}
 
 	server.logWithFields("info", "startup config", logFields{
@@ -846,10 +848,11 @@ func main() {
 		"email_language":             cfg.Email.Language,
 		"turnstile_configured":       turnstileSecret != "",
 		"elastic_logging":            elasticLogger != nil,
+		"pixel_url_blacklist_count":  len(server.pixelURLBlacklist),
 	})
 
 	log.Printf(
-		"startup config: config_path=%s storage_backend=%s verification_base_url=%s verification_ttl=%s password_reset_base_url=%s reset_ttl=%s smtp_configured=%t disable_verification_email=%t pixel_cost_points=%d email_language=%s turnstile_configured=%t",
+		"startup config: config_path=%s storage_backend=%s verification_base_url=%s verification_ttl=%s password_reset_base_url=%s reset_ttl=%s smtp_configured=%t disable_verification_email=%t pixel_cost_points=%d email_language=%s turnstile_configured=%t pixel_url_blacklist_count=%d",
 		configPath,
 		storeDescription,
 		verificationBaseURL,
@@ -861,6 +864,7 @@ func main() {
 		pixelCost,
 		cfg.Email.Language,
 		turnstileSecret != "",
+		len(server.pixelURLBlacklist),
 	)
 
 	router.POST("/api/register", server.handleRegister)
@@ -1506,6 +1510,36 @@ func (s *Server) handleRedeemActivationCode(c *gin.Context) {
 	})
 }
 
+func (s *Server) isPixelURLBlocked(rawURL string) (string, bool) {
+	if s == nil {
+		return "", false
+	}
+	normalized := strings.ToLower(strings.TrimSpace(rawURL))
+	if normalized == "" {
+		return "", false
+	}
+
+	var host string
+	if parsed, err := url.Parse(normalized); err == nil {
+		host = strings.ToLower(parsed.Hostname())
+	}
+
+	for _, entry := range s.pixelURLBlacklist {
+		keyword := strings.ToLower(strings.TrimSpace(entry))
+		if keyword == "" {
+			continue
+		}
+		if host != "" && (host == keyword || strings.Contains(host, keyword)) {
+			return fmt.Sprintf("url contains blocked keyword or domain: %s", keyword), true
+		}
+		if strings.Contains(normalized, keyword) {
+			return fmt.Sprintf("url contains blocked keyword or domain: %s", keyword), true
+		}
+	}
+
+	return "", false
+}
+
 func (s *Server) handleUpdatePixel(c *gin.Context) {
 	user, ok := s.requireUser(c)
 	if !ok {
@@ -1547,6 +1581,15 @@ func (s *Server) handleUpdatePixel(c *gin.Context) {
 			url := strings.TrimSpace(item.URL)
 			if color == "" || url == "" {
 				result.Error = "taken pixels require color and url"
+				if firstErrStatus == 0 {
+					firstErrStatus = http.StatusBadRequest
+					firstErrMessage = result.Error
+				}
+				results = append(results, result)
+				continue
+			}
+			if message, blocked := s.isPixelURLBlocked(url); blocked {
+				result.Error = message
 				if firstErrStatus == 0 {
 					firstErrStatus = http.StatusBadRequest
 					firstErrMessage = result.Error

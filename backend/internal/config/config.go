@@ -22,6 +22,7 @@ type Config struct {
 	PasswordReset            PasswordReset     `json:"passwordReset"`
 	Verification             Verification      `json:"verification"`
 	TurnstileSecretKey       string            `json:"turnstileSecretKey"`
+	PixelURLBlacklist        []string          `json:"pixelUrlBlacklist"`
 }
 
 // EmailConfig controls localisation of transactional emails sent by the backend.
@@ -81,6 +82,22 @@ func (c *MySQLConfig) sanitize() {
 	c.ExternalDSN = strings.TrimSpace(c.ExternalDSN)
 }
 
+func defaultPixelURLBlacklist() []string {
+	entries := []string{
+		"porn",
+		"pornhub.com",
+		"xvideos.com",
+		"xnxx.com",
+		"redtube.com",
+		"onlyfans.com",
+		"sex",
+		"xxx",
+		"nsfw",
+		"fuck",
+	}
+	return normalizePixelURLBlacklist(entries)
+}
+
 // Default returns the configuration used when no config file exists on disk yet.
 func Default() *Config {
 	return &Config{
@@ -90,6 +107,7 @@ func Default() *Config {
 		Email:                    EmailConfig{Language: "pl"},
 		PasswordReset:            PasswordReset{TokenTTLHours: 24},
 		Verification:             Verification{TokenTTLHours: 24},
+		PixelURLBlacklist:        defaultPixelURLBlacklist(),
 	}
 }
 
@@ -164,6 +182,10 @@ func Load(path string) (*Config, error) {
 		cfg.Verification.TokenTTLHours = Default().Verification.TokenTTLHours
 	}
 	cfg.Verification.BaseURL = strings.TrimSpace(cfg.Verification.BaseURL)
+
+	if cfg.PixelURLBlacklist = normalizePixelURLBlacklist(cfg.PixelURLBlacklist); len(cfg.PixelURLBlacklist) == 0 {
+		cfg.PixelURLBlacklist = defaultPixelURLBlacklist()
+	}
 
 	if cfg.Database == nil {
 		cfg.Database = defaultDatabaseConfig()
@@ -290,4 +312,27 @@ func removeTrailingCommas(input []byte) []byte {
 		buf.WriteByte(ch)
 	}
 	return buf.Bytes()
+}
+
+func normalizePixelURLBlacklist(entries []string) []string {
+	if len(entries) == 0 {
+		return nil
+	}
+	normalized := make([]string, 0, len(entries))
+	seen := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		cleaned := strings.ToLower(strings.TrimSpace(entry))
+		if cleaned == "" {
+			continue
+		}
+		if _, ok := seen[cleaned]; ok {
+			continue
+		}
+		seen[cleaned] = struct{}{}
+		normalized = append(normalized, cleaned)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
 }

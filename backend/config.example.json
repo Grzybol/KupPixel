@@ -1,6 +1,19 @@
 {
   // Number of points required to claim a pixel.
   "pixelCostPoints": 10,
+  // List of domains and keywords that are blocked from being used in pixel URLs.
+  "pixelUrlBlacklist": [
+    "porn",
+    "pornhub.com",
+    "xvideos.com",
+    "xnxx.com",
+    "redtube.com",
+    "onlyfans.com",
+    "sex",
+    "xxx",
+    "nsfw",
+    "fuck"
+  ],
   // Set to true to automatically mark newly created accounts as verified and skip emails.
   "disableVerificationEmail": false,
   // Secret key used to verify Cloudflare Turnstile challenges on protected forms.

@@ -77,10 +77,13 @@ function parseUser(data: unknown): AuthUser | null {
   if ("email" in data && typeof (data as Record<string, unknown>).email === "string") {
     return data as AuthUser;
   }
-  if ("user" in data && typeof (data as Record<string, unknown>).user === "object") {
-    const nested = (data as Record<string, unknown>).user as Record<string, unknown>;
-    if (typeof nested.email === "string") {
-      return nested as AuthUser;
+  if ("user" in data) {
+    const nested = (data as Record<string, unknown>).user;
+    if (nested && typeof nested === "object" && "email" in nested) {
+      const record = nested as Record<string, unknown>;
+      if (typeof record.email === "string") {
+        return record as AuthUser;
+      }
     }
   }
   return null;

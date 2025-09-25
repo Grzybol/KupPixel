@@ -1,4 +1,6 @@
 import { FormEvent, useCallback, useEffect, useId, useState } from "react";
+import TurnstileWidget from "./TurnstileWidget";
+import { TURNSTILE_SITE_KEY } from "../config";
 import { useI18n } from "../lang/I18nProvider";
 
 type ResendVerificationFormProps = {
@@ -11,8 +13,15 @@ export default function ResendVerificationForm({ initialEmail = "", className }:
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const inputId = useId();
   const { t } = useI18n();
+
+  const resetCaptcha = useCallback(() => {
+    setCaptchaToken("");
+    setCaptchaResetKey((key) => key + 1);
+  }, []);
 
   useEffect(() => {
     setEmail(initialEmail);
@@ -23,6 +32,10 @@ export default function ResendVerificationForm({ initialEmail = "", className }:
       event.preventDefault();
       setError(null);
       setSuccess(null);
+      if (!captchaToken) {
+        setError(t("auth.captcha.required"));
+        return;
+      }
       setIsSubmitting(true);
       try {
         const response = await fetch("/api/resend-verification", {
@@ -31,18 +44,25 @@ export default function ResendVerificationForm({ initialEmail = "", className }:
             "Content-Type": "application/json",
           },
           credentials: "include",
-          body: JSON.stringify({ email }),
+          body: JSON.stringify({
+            email,
+            turnstile_token: captchaToken,
+          }),
         });
         const payload = await response.json().catch(() => null);
         if (!response.ok) {
-        const message =
-          (payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).error === "string"
-            ? ((payload as Record<string, unknown>).error as string)
-            : null) || t("auth.errors.resend");
+          const message =
+            (payload &&
+              typeof payload === "object" &&
+              typeof (payload as Record<string, unknown>).error === "string"
+              ? ((payload as Record<string, unknown>).error as string)
+              : null) || t("auth.errors.resend");
           throw new Error(message);
         }
         const message =
-          payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).message === "string"
+          payload &&
+          typeof payload === "object" &&
+          typeof (payload as Record<string, unknown>).message === "string"
             ? ((payload as Record<string, unknown>).message as string)
             : t("auth.messages.resendSuccess");
         setSuccess(message);
@@ -52,9 +72,10 @@ export default function ResendVerificationForm({ initialEmail = "", className }:
         setError(message);
       } finally {
         setIsSubmitting(false);
+        resetCaptcha();
       }
     },
-    [email, t]
+    [captchaToken, email, resetCaptcha, t]
   );
 
   return (
@@ -86,11 +107,30 @@ export default function ResendVerificationForm({ initialEmail = "", className }:
           {success}
         </p>
       )}
+      <div className="space-y-2">
+        <p className="text-xs text-slate-400">{t("auth.captcha.label")}</p>
+        <TurnstileWidget
+          siteKey={TURNSTILE_SITE_KEY}
+          onTokenChange={(token) => {
+            setCaptchaToken(token);
+            if (token) {
+              setError(null);
+            }
+          }}
+          onExpire={() => {
+            setCaptchaToken("");
+            setError(t("auth.captcha.required"));
+          }}
+          onError={(message) => setError(message)}
+          resetKey={captchaResetKey}
+          className="mt-1"
+        />
+      </div>
       <div className="flex justify-end">
         <button
           type="submit"
           className="inline-flex items-center justify-center rounded-full bg-blue-500 px-5 py-2 text-sm font-semibold text-white shadow-lg transition hover:bg-blue-400 disabled:cursor-not-allowed disabled:opacity-70"
-          disabled={isSubmitting}
+          disabled={isSubmitting || !captchaToken}
         >
           {isSubmitting ? t("resend.submitting") : t("resend.submit")}
         </button>

@@ -10,6 +10,16 @@ services:
       # - "3000:3000"
     environment:
       - NODE_ENV=production
+      - ELASTIC_URL=${ELASTIC_URL:-https://127.0.0.1:9200}
+      - ELASTIC_INDEX=${ELASTIC_INDEX:-website-backend}
+      - ELASTIC_API_KEY=${ELASTIC_API_KEY}
+      - ELASTIC_VERIFY_CERT=${ELASTIC_VERIFY_CERT:-false}
+      - ELASTIC_CA_PATH=${ELASTIC_CA_PATH:-}
+      - ELASTIC_FLUSH_MS=${ELASTIC_FLUSH_MS:-60000}
+      - ELASTIC_MAX_BUFFER=${ELASTIC_MAX_BUFFER:-2000}
+      - ELASTIC_MAX_BYTES=${ELASTIC_MAX_BYTES:-5242880}
+      - ELASTIC_MAX_RETRIES=${ELASTIC_MAX_RETRIES:-3}
+      - VITE_TURNSTILE_DEBUG=${VITE_TURNSTILE_DEBUG:-false}
     network_mode: host
     volumes:
       - pixel-data:/app/data

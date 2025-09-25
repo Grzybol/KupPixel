@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net"
@@ -18,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +28,7 @@ import (
 
 	"github.com/example/kup-piksel/internal/config"
 	"github.com/example/kup-piksel/internal/email"
+	"github.com/example/kup-piksel/internal/logger/elastic"
 	"github.com/example/kup-piksel/internal/storage"
 	"github.com/example/kup-piksel/internal/storage/mysql"
 	"github.com/example/kup-piksel/internal/storage/sqlite"
@@ -64,6 +67,8 @@ type Server struct {
 	pixelCostPoints          int64
 	turnstileSecret          string
 	turnstileVerify          turnstileVerifier
+	logger                   *elastic.Logger
+	stdlog                   *log.Logger
 }
 
 type SessionManager struct {
@@ -78,6 +83,138 @@ type turnstileResponse struct {
 
 type turnstileVerifier func(ctx context.Context, secret, token, remoteIP string) (turnstileResponse, error)
 
+type logFields map[string]any
+
+const turnstileRequestIDKey = "turnstile.request_id"
+
+type contextKey string
+
+var turnstileRequestIDContextKey = contextKey(turnstileRequestIDKey)
+
+func (s *Server) logWithFields(level, message string, fields logFields) {
+	if s == nil {
+		return
+	}
+	normalized := strings.ToUpper(strings.TrimSpace(level))
+	if normalized == "" {
+		normalized = "INFO"
+	}
+	formatted := formatLogFields(fields)
+	if s.stdlog != nil {
+		if formatted != "" {
+			s.stdlog.Printf("[%s] %s | %s", normalized, message, formatted)
+		} else {
+			s.stdlog.Printf("[%s] %s", normalized, message)
+		}
+	} else {
+		if formatted != "" {
+			log.Printf("[%s] %s | %s", normalized, message, formatted)
+		} else {
+			log.Printf("[%s] %s", normalized, message)
+		}
+	}
+	if s.logger != nil {
+		var payload elastic.Fields
+		if len(fields) > 0 {
+			payload = make(elastic.Fields, len(fields))
+			for k, v := range fields {
+				if k == "" || v == nil {
+					continue
+				}
+				payload[k] = v
+			}
+		}
+		s.logger.Log(normalized, message, payload)
+	}
+}
+
+func (s *Server) logf(level, format string, args ...interface{}) {
+	s.logWithFields(level, fmt.Sprintf(format, args...), nil)
+}
+
+func (s *Server) logInfof(format string, args ...interface{}) {
+	s.logf("info", format, args...)
+}
+
+func (s *Server) logWarnf(format string, args ...interface{}) {
+	s.logf("warn", format, args...)
+}
+
+func (s *Server) logErrorf(format string, args ...interface{}) {
+	s.logf("error", format, args...)
+}
+
+func formatLogFields(fields logFields) string {
+	if len(fields) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(fields))
+	for key, value := range fields {
+		if value == nil {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	if len(keys) == 0 {
+		return ""
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%v", key, fields[key]))
+	}
+	return strings.Join(parts, " ")
+}
+
+func ensureTurnstileRequestID(c *gin.Context) string {
+	if c == nil || c.Request == nil {
+		return ""
+	}
+	ctx := c.Request.Context()
+	if existing := ctx.Value(turnstileRequestIDContextKey); existing != nil {
+		if id, ok := existing.(string); ok && id != "" {
+			return id
+		}
+	}
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		return ""
+	}
+	id := hex.EncodeToString(buf)
+	c.Request = c.Request.WithContext(context.WithValue(ctx, turnstileRequestIDContextKey, id))
+	return id
+}
+
+func (s *Server) logTurnstileEvent(c *gin.Context, level, stage, message string, fields logFields) {
+	data := make(logFields, len(fields)+6)
+	for k, v := range fields {
+		if k == "" || v == nil {
+			continue
+		}
+		data[k] = v
+	}
+	if stage != "" {
+		data["turnstile_stage"] = stage
+	}
+	if _, ok := data["turnstile_source"]; !ok {
+		data["turnstile_source"] = "backend"
+	}
+	if c != nil && c.Request != nil {
+		if ip := extractRemoteIP(c.Request); ip != "" {
+			data["remote_ip"] = ip
+		}
+		if c.Request.URL != nil {
+			data["path"] = c.Request.URL.Path
+		}
+		if ua := strings.TrimSpace(c.Request.UserAgent()); ua != "" {
+			data["user_agent"] = ua
+		}
+	}
+	if id := ensureTurnstileRequestID(c); id != "" {
+		data["turnstile_request_id"] = id
+	}
+	s.logWithFields(level, message, data)
+}
 func NewSessionManager() *SessionManager {
 	return &SessionManager{sessions: make(map[string]int64)}
 }
@@ -140,6 +277,14 @@ type passwordResetConfirmRequest struct {
 type activationCodeRequest struct {
 	Code  string `json:"code"`
 	Token string `json:"turnstile_token"`
+}
+
+type turnstileDebugRequest struct {
+	Stage  string         `json:"stage"`
+	Status string         `json:"status"`
+	Detail any            `json:"detail"`
+	Error  string         `json:"error"`
+	Meta   map[string]any `json:"meta"`
 }
 
 type userResponse struct {
@@ -354,7 +499,7 @@ func buildPasswordResetLink(base string, token string) (string, error) {
 func (s *Server) getSessionUser(c *gin.Context) (storage.User, string, bool) {
 	sessionID, ok, err := readSessionCookie(c.Request)
 	if err != nil {
-		log.Printf("read session cookie: %v", err)
+		s.logWarnf("read session cookie: %v", err)
 		return storage.User{}, "", false
 	}
 	if !ok {
@@ -371,7 +516,7 @@ func (s *Server) getSessionUser(c *gin.Context) (storage.User, string, bool) {
 		if errors.Is(err, sql.ErrNoRows) {
 			return storage.User{}, sessionID, false
 		}
-		log.Printf("load user %d: %v", userID, err)
+		s.logErrorf("load user %d: %v", userID, err)
 		return storage.User{}, sessionID, false
 	}
 
@@ -466,11 +611,13 @@ func isPublicIP(ip net.IP) bool {
 func (s *Server) requireTurnstile(c *gin.Context, token string) bool {
 	trimmed := strings.TrimSpace(token)
 	if trimmed == "" {
+		s.logTurnstileEvent(c, "warn", "token.missing", "Turnstile token missing", logFields{"reason": "empty_token"})
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Potwierdź, że nie jesteś robotem."})
 		return false
 	}
+
 	if strings.TrimSpace(s.turnstileSecret) == "" {
-		log.Printf("turnstile secret key missing in configuration")
+		s.logTurnstileEvent(c, "error", "configuration", "Turnstile secret key missing in configuration", logFields{"reason": "missing_secret"})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Weryfikacja bezpieczeństwa jest chwilowo niedostępna."})
 		return false
 	}
@@ -484,24 +631,89 @@ func (s *Server) requireTurnstile(c *gin.Context, token string) bool {
 	defer cancel()
 
 	remoteIP := extractRemoteIP(c.Request)
+	s.logTurnstileEvent(c, "info", "verify.request", "Turnstile verification request", logFields{"token_length": len(trimmed)})
 	result, err := verifier(ctx, s.turnstileSecret, trimmed, remoteIP)
 	if err != nil {
-		log.Printf("turnstile verification error: %v", err)
+		s.logTurnstileEvent(c, "error", "verify.transport", "Turnstile verification error", logFields{"error": err.Error(), "token_length": len(trimmed)})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Nie udało się zweryfikować zabezpieczenia. Spróbuj ponownie."})
 		return false
 	}
 	if !result.Success {
 		if len(result.ErrorCodes) > 0 {
-			log.Printf("turnstile verification failed: codes=%v", result.ErrorCodes)
+			s.logTurnstileEvent(c, "warn", "verify.failure", "Turnstile verification failed", logFields{"error_codes": result.ErrorCodes, "token_length": len(trimmed)})
+		} else {
+			s.logTurnstileEvent(c, "warn", "verify.failure", "Turnstile verification failed", logFields{"token_length": len(trimmed)})
 		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Nieprawidłowa weryfikacja CAPTCHA."})
 		return false
 	}
+	s.logTurnstileEvent(c, "info", "verify.success", "Turnstile verification succeeded", logFields{"token_length": len(trimmed)})
 
 	return true
 }
 
+func (s *Server) handleTurnstileDebug(c *gin.Context) {
+	var req turnstileDebugRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	stage := strings.TrimSpace(req.Stage)
+	if stage == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "stage is required"})
+		return
+	}
+	status := strings.TrimSpace(req.Status)
+	errMsg := strings.TrimSpace(req.Error)
+	fields := logFields{"turnstile_source": "frontend"}
+	if status != "" {
+		fields["turnstile_status"] = status
+	}
+	if req.Detail != nil {
+		fields["turnstile_detail"] = req.Detail
+	}
+	if errMsg != "" {
+		fields["turnstile_error"] = errMsg
+	}
+	if len(req.Meta) > 0 {
+		fields["turnstile_meta"] = req.Meta
+	}
+	level := "info"
+	switch strings.ToLower(status) {
+	case "error", "failed", "failure":
+		level = "warn"
+	}
+	if errMsg != "" && level == "info" {
+		level = "warn"
+	}
+	message := fmt.Sprintf("Turnstile frontend stage: %s", stage)
+	s.logTurnstileEvent(c, level, stage, message, fields)
+	c.Status(http.StatusNoContent)
+}
+
 func main() {
+	elasticCfg, elasticEnabled, err := elastic.FromEnv()
+	if err != nil {
+		log.Fatalf("elastic config: %v", err)
+	}
+	var elasticLogger *elastic.Logger
+	if elasticEnabled {
+		elasticLogger, err = elastic.NewLogger(elasticCfg)
+		if err != nil {
+			log.Fatalf("elastic logger: %v", err)
+		}
+		log.SetOutput(io.MultiWriter(os.Stderr, elasticLogger))
+	}
+	if elasticLogger != nil {
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if closeErr := elasticLogger.Close(ctx); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "[ElasticLogger] close error: %v\n", closeErr)
+			}
+		}()
+	}
+
 	configPath := os.Getenv("PIXEL_CONFIG_PATH")
 	if configPath == "" {
 		configPath = defaultConfigPath
@@ -614,7 +826,24 @@ func main() {
 		pixelCostPoints:          int64(pixelCost),
 		turnstileSecret:          turnstileSecret,
 		turnstileVerify:          defaultTurnstileVerifier,
+		logger:                   elasticLogger,
+		stdlog:                   log.New(os.Stderr, "", log.LstdFlags),
 	}
+
+	server.logWithFields("info", "startup config", logFields{
+		"config_path":                configPath,
+		"storage_backend":            storeDescription,
+		"verification_base_url":      verificationBaseURL,
+		"verification_ttl":           verificationTTL.String(),
+		"password_reset_base_url":    passwordResetBaseURL,
+		"password_reset_ttl":         passwordResetTTL.String(),
+		"smtp_configured":            smtpConfigured,
+		"disable_verification_email": cfg.DisableVerificationEmail,
+		"pixel_cost_points":          pixelCost,
+		"email_language":             cfg.Email.Language,
+		"turnstile_configured":       turnstileSecret != "",
+		"elastic_logging":            elasticLogger != nil,
+	})
 
 	log.Printf(
 		"startup config: config_path=%s storage_backend=%s verification_base_url=%s verification_ttl=%s password_reset_base_url=%s reset_ttl=%s smtp_configured=%t disable_verification_email=%t pixel_cost_points=%d email_language=%s turnstile_configured=%t",
@@ -634,6 +863,7 @@ func main() {
 	router.POST("/api/register", server.handleRegister)
 	router.POST("/api/login", server.handleLogin)
 	router.POST("/api/logout", server.handleLogout)
+	router.POST("/api/debug/turnstile", server.handleTurnstileDebug)
 	router.GET("/api/session", server.handleSession)
 	router.GET("/api/account", server.handleAccount)
 	router.POST("/api/activation-codes/redeem", server.handleRedeemActivationCode)
@@ -662,7 +892,7 @@ func main() {
 func (s *Server) handleGetPixels(c *gin.Context) {
 	state, err := s.store.GetAllPixels(c.Request.Context())
 	if err != nil {
-		log.Printf("get pixels: %v", err)
+		s.logErrorf("get pixels: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load pixels"})
 		return
 	}
@@ -689,7 +919,7 @@ func (s *Server) handleRegister(c *gin.Context) {
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		log.Printf("hash password: %v", err)
+		s.logErrorf("hash password: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create user"})
 		return
 	}
@@ -703,7 +933,7 @@ func (s *Server) handleRegister(c *gin.Context) {
 					c.JSON(http.StatusConflict, gin.H{"error": "user already exists"})
 					return
 				}
-				log.Printf("get user after duplicate registration: %v", getErr)
+				s.logErrorf("get user after duplicate registration: %v", getErr)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create user"})
 				return
 			}
@@ -713,28 +943,28 @@ func (s *Server) handleRegister(c *gin.Context) {
 				return
 			}
 
-			log.Printf("register: existing unverified user found id=%d email=%s", existing.ID, existing.Email)
+			s.logWithFields("info", "register: existing unverified user found", logFields{"user_id": existing.ID, "email": existing.Email})
 
 			token, issueErr := s.issueVerificationToken(c.Request.Context(), existing)
 			if issueErr != nil {
-				log.Printf("issue verification token (duplicate register): %v", issueErr)
+				s.logErrorf("issue verification token (duplicate register): %v", issueErr)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 				return
 			}
 
-			log.Printf("register: issued verification token for user_id=%d", existing.ID)
+			s.logWithFields("info", "register: issued verification token for existing user", logFields{"user_id": existing.ID})
 
 			link, linkErr := buildVerificationLink(s.verificationBaseURL, token)
 			if linkErr != nil {
-				log.Printf("build verification link (duplicate register): %v", linkErr)
+				s.logErrorf("build verification link (duplicate register): %v", linkErr)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 				return
 			}
 
-			log.Printf("register: sending verification email to %s (duplicate register)", existing.Email)
+			s.logWithFields("info", "register: sending verification email (duplicate)", logFields{"email": existing.Email})
 
 			if sendErr := s.mailer.SendVerificationEmail(c.Request.Context(), existing.Email, link); sendErr != nil {
-				log.Printf("send verification email (duplicate register): %v", sendErr)
+				s.logErrorf("send verification email (duplicate register): %v", sendErr)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send verification email"})
 				return
 			}
@@ -744,21 +974,21 @@ func (s *Server) handleRegister(c *gin.Context) {
 			})
 			return
 		}
-		log.Printf("create user: %v", err)
+		s.logErrorf("create user: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create user"})
 		return
 	}
 
-	log.Printf("register: created new user id=%d email=%s disable_verification_email=%t", user.ID, user.Email, s.disableVerificationEmail)
+	s.logWithFields("info", "register: created new user", logFields{"user_id": user.ID, "email": user.Email, "disable_verification_email": s.disableVerificationEmail})
 
 	if s.disableVerificationEmail {
 		if err := s.store.MarkUserVerified(c.Request.Context(), user.ID); err != nil {
-			log.Printf("auto-verify user: %v", err)
+			s.logErrorf("auto-verify user: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify user"})
 			return
 		}
 		if err := s.store.DeleteVerificationTokensForUser(c.Request.Context(), user.ID); err != nil {
-			log.Printf("cleanup verification tokens after auto verify: %v", err)
+			s.logWarnf("cleanup verification tokens after auto verify: %v", err)
 		}
 		c.JSON(http.StatusCreated, gin.H{
 			"message": "Konto zostało utworzone i jest już potwierdzone. Możesz się zalogować.",
@@ -766,28 +996,28 @@ func (s *Server) handleRegister(c *gin.Context) {
 		return
 	}
 
-	log.Printf("register: issuing verification token for user_id=%d", user.ID)
+	s.logWithFields("info", "register: issuing verification token", logFields{"user_id": user.ID})
 
 	token, err := s.issueVerificationToken(c.Request.Context(), user)
 	if err != nil {
-		log.Printf("issue verification token: %v", err)
+		s.logErrorf("issue verification token: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 		return
 	}
 
-	log.Printf("register: verification token issued for user_id=%d", user.ID)
+	s.logWithFields("info", "register: verification token issued", logFields{"user_id": user.ID})
 
 	link, err := buildVerificationLink(s.verificationBaseURL, token)
 	if err != nil {
-		log.Printf("build verification link: %v", err)
+		s.logErrorf("build verification link: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 		return
 	}
 
-	log.Printf("register: sending verification email to %s", user.Email)
+	s.logWithFields("info", "register: sending verification email", logFields{"email": user.Email, "user_id": user.ID})
 
 	if err := s.mailer.SendVerificationEmail(c.Request.Context(), user.Email, link); err != nil {
-		log.Printf("send verification email: %v", err)
+		s.logErrorf("send verification email: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send verification email"})
 		return
 	}
@@ -821,7 +1051,7 @@ func (s *Server) handleLogin(c *gin.Context) {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 			return
 		}
-		log.Printf("get user: %v", err)
+		s.logErrorf("get user: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to login"})
 		return
 	}
@@ -837,28 +1067,28 @@ func (s *Server) handleLogin(c *gin.Context) {
 			return
 		}
 
-		log.Printf("login: user %d not verified, issuing verification token", user.ID)
+		s.logWithFields("info", "login: unverified user attempting login", logFields{"user_id": user.ID, "email": user.Email})
 
 		token, err := s.issueVerificationToken(c.Request.Context(), user)
 		if err != nil {
-			log.Printf("issue verification token (login): %v", err)
+			s.logErrorf("issue verification token (login): %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 			return
 		}
 
-		log.Printf("login: verification token issued for user_id=%d", user.ID)
+		s.logWithFields("info", "login: verification token issued", logFields{"user_id": user.ID})
 
 		link, err := buildVerificationLink(s.verificationBaseURL, token)
 		if err != nil {
-			log.Printf("build verification link (login): %v", err)
+			s.logErrorf("build verification link (login): %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 			return
 		}
 
-		log.Printf("login: sending verification email to %s", user.Email)
+		s.logWithFields("info", "login: sending verification email", logFields{"email": user.Email, "user_id": user.ID})
 
 		if err := s.mailer.SendVerificationEmail(c.Request.Context(), user.Email, link); err != nil {
-			log.Printf("send verification email (login): %v", err)
+			s.logErrorf("send verification email (login): %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send verification email"})
 			return
 		}
@@ -869,7 +1099,7 @@ func (s *Server) handleLogin(c *gin.Context) {
 
 	sessionID, err := s.sessions.Create(user.ID)
 	if err != nil {
-		log.Printf("create session: %v", err)
+		s.logErrorf("create session: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
 		return
 	}
@@ -886,12 +1116,12 @@ func (s *Server) issueVerificationToken(ctx context.Context, user storage.User) 
 		return "", errors.New("invalid user id")
 	}
 
-	log.Printf("issueVerificationToken: start user_id=%d", user.ID)
+	s.logWithFields("info", "issueVerificationToken: start", logFields{"user_id": user.ID})
 
 	if err := s.store.DeleteVerificationTokensForUser(ctx, user.ID); err != nil {
 		return "", err
 	}
-	log.Printf("issueVerificationToken: cleared previous tokens for user_id=%d", user.ID)
+	s.logWithFields("info", "issueVerificationToken: cleared previous tokens", logFields{"user_id": user.ID})
 
 	var token string
 	var err error
@@ -903,19 +1133,18 @@ func (s *Server) issueVerificationToken(ctx context.Context, user storage.User) 
 		expires := time.Now().Add(s.verificationTokenTTL)
 		_, storeErr := s.store.CreateVerificationToken(ctx, token, user.ID, expires)
 		if storeErr == nil {
-			log.Printf(
-				"issueVerificationToken: stored token for user_id=%d expires_at=%s attempt=%d",
-				user.ID,
-				expires.Format(time.RFC3339),
-				i+1,
-			)
+			s.logWithFields("info", "issueVerificationToken: stored token", logFields{
+				"user_id":    user.ID,
+				"expires_at": expires.Format(time.RFC3339),
+				"attempt":    i + 1,
+			})
 			return token, nil
 		}
 		if !strings.Contains(strings.ToLower(storeErr.Error()), "token already exists") {
 			return "", storeErr
 		}
 	}
-	log.Printf("issueVerificationToken: failed to create unique token for user_id=%d", user.ID)
+	s.logWithFields("error", "issueVerificationToken: failed to create unique token", logFields{"user_id": user.ID})
 	return "", errors.New("unable to create unique verification token")
 }
 
@@ -925,7 +1154,7 @@ func (s *Server) issuePasswordResetToken(ctx context.Context, user storage.User)
 	}
 
 	if err := s.store.DeletePasswordResetTokensForUser(ctx, user.ID); err != nil {
-		log.Printf("cleanup password reset tokens for user_id=%d: %v", user.ID, err)
+		s.logWarnf("cleanup password reset tokens for user_id=%d: %v", user.ID, err)
 	}
 
 	ttl := s.passwordResetTokenTTL
@@ -942,12 +1171,11 @@ func (s *Server) issuePasswordResetToken(ctx context.Context, user storage.User)
 
 		_, storeErr := s.store.CreatePasswordResetToken(ctx, token, user.ID, expires)
 		if storeErr == nil {
-			log.Printf(
-				"issuePasswordResetToken: stored token for user_id=%d expires_at=%s attempt=%d",
-				user.ID,
-				expires.Format(time.RFC3339),
-				i+1,
-			)
+			s.logWithFields("info", "issuePasswordResetToken: stored token", logFields{
+				"user_id":    user.ID,
+				"expires_at": expires.Format(time.RFC3339),
+				"attempt":    i + 1,
+			})
 			return token, nil
 		}
 		if !strings.Contains(strings.ToLower(storeErr.Error()), "token already exists") {
@@ -955,7 +1183,7 @@ func (s *Server) issuePasswordResetToken(ctx context.Context, user storage.User)
 		}
 	}
 
-	log.Printf("issuePasswordResetToken: failed to create unique token for user_id=%d", user.ID)
+	s.logWithFields("error", "issuePasswordResetToken: failed to create unique token", logFields{"user_id": user.ID})
 	return "", errors.New("unable to create unique password reset token")
 }
 
@@ -976,7 +1204,7 @@ func (s *Server) handleVerifyAccount(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "nieprawidłowy lub wykorzystany token"})
 			return
 		}
-		log.Printf("get verification token: %v", err)
+		s.logErrorf("get verification token: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify account"})
 		return
 	}
@@ -992,13 +1220,13 @@ func (s *Server) handleVerifyAccount(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "konto nie istnieje"})
 			return
 		}
-		log.Printf("mark user verified: %v", err)
+		s.logErrorf("mark user verified: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify account"})
 		return
 	}
 
 	if err := s.store.DeleteVerificationTokensForUser(c.Request.Context(), record.UserID); err != nil {
-		log.Printf("cleanup verification tokens: %v", err)
+		s.logWarnf("cleanup verification tokens: %v", err)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Adres e-mail został potwierdzony. Możesz się teraz zalogować."})
@@ -1031,7 +1259,7 @@ func (s *Server) handleResendVerification(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "konto z tym adresem e-mail nie istnieje"})
 			return
 		}
-		log.Printf("get user for resend: %v", err)
+		s.logErrorf("get user for resend: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process request"})
 		return
 	}
@@ -1041,28 +1269,28 @@ func (s *Server) handleResendVerification(c *gin.Context) {
 		return
 	}
 
-	log.Printf("resend: issuing verification token for user_id=%d", user.ID)
+	s.logWithFields("info", "resend: issuing verification token", logFields{"user_id": user.ID})
 
 	token, err := s.issueVerificationToken(c.Request.Context(), user)
 	if err != nil {
-		log.Printf("issue verification token (resend): %v", err)
+		s.logErrorf("issue verification token (resend): %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 		return
 	}
 
-	log.Printf("resend: verification token issued for user_id=%d", user.ID)
+	s.logWithFields("info", "resend: verification token issued", logFields{"user_id": user.ID})
 
 	link, err := buildVerificationLink(s.verificationBaseURL, token)
 	if err != nil {
-		log.Printf("build verification link (resend): %v", err)
+		s.logErrorf("build verification link (resend): %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 		return
 	}
 
-	log.Printf("resend: sending verification email to %s", user.Email)
+	s.logWithFields("info", "resend: sending verification email", logFields{"email": user.Email, "user_id": user.ID})
 
 	if err := s.mailer.SendVerificationEmail(c.Request.Context(), user.Email, link); err != nil {
-		log.Printf("send verification email (resend): %v", err)
+		s.logErrorf("send verification email (resend): %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send verification email"})
 		return
 	}
@@ -1095,27 +1323,27 @@ func (s *Server) handlePasswordResetRequest(c *gin.Context) {
 			c.JSON(http.StatusAccepted, gin.H{"message": responseMessage})
 			return
 		}
-		log.Printf("get user for password reset: %v", err)
+		s.logErrorf("get user for password reset: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process request"})
 		return
 	}
 
 	token, err := s.issuePasswordResetToken(c.Request.Context(), user)
 	if err != nil {
-		log.Printf("issue password reset token: %v", err)
+		s.logErrorf("issue password reset token: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare reset"})
 		return
 	}
 
 	link, err := buildPasswordResetLink(s.passwordResetBaseURL, token)
 	if err != nil {
-		log.Printf("build password reset link: %v", err)
+		s.logErrorf("build password reset link: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare reset"})
 		return
 	}
 
 	if err := s.mailer.SendPasswordResetEmail(c.Request.Context(), user.Email, link); err != nil {
-		log.Printf("send password reset email: %v", err)
+		s.logErrorf("send password reset email: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send reset email"})
 		return
 	}
@@ -1153,14 +1381,14 @@ func (s *Server) handlePasswordResetConfirm(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "nieprawidłowy lub wykorzystany token"})
 			return
 		}
-		log.Printf("get password reset token: %v", err)
+		s.logErrorf("get password reset token: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reset password"})
 		return
 	}
 
 	if time.Now().After(record.ExpiresAt) {
 		if delErr := s.store.DeletePasswordResetToken(c.Request.Context(), token); delErr != nil {
-			log.Printf("cleanup expired password reset token: %v", delErr)
+			s.logWarnf("cleanup expired password reset token: %v", delErr)
 		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "token wygasł. Poproś o nowy link resetu hasła."})
 		return
@@ -1168,7 +1396,7 @@ func (s *Server) handlePasswordResetConfirm(c *gin.Context) {
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		log.Printf("hash password reset: %v", err)
+		s.logErrorf("hash password reset: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reset password"})
 		return
 	}
@@ -1178,13 +1406,13 @@ func (s *Server) handlePasswordResetConfirm(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "konto nie istnieje"})
 			return
 		}
-		log.Printf("update user password: %v", err)
+		s.logErrorf("update user password: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reset password"})
 		return
 	}
 
 	if err := s.store.DeletePasswordResetTokensForUser(c.Request.Context(), record.UserID); err != nil {
-		log.Printf("cleanup password reset tokens for user_id=%d: %v", record.UserID, err)
+		s.logWarnf("cleanup password reset tokens for user_id=%d: %v", record.UserID, err)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Hasło zostało zaktualizowane."})
@@ -1193,7 +1421,7 @@ func (s *Server) handlePasswordResetConfirm(c *gin.Context) {
 func (s *Server) handleLogout(c *gin.Context) {
 	sessionID, ok, err := readSessionCookie(c.Request)
 	if err != nil {
-		log.Printf("read session cookie: %v", err)
+		s.logWarnf("read session cookie: %v", err)
 	}
 	if ok {
 		s.sessions.Delete(sessionID)
@@ -1223,7 +1451,7 @@ func (s *Server) handleAccount(c *gin.Context) {
 
 	pixels, err := s.store.GetPixelsByOwner(c.Request.Context(), user.ID)
 	if err != nil {
-		log.Printf("get pixels for user %d: %v", user.ID, err)
+		s.logErrorf("get pixels for user %d: %v", user.ID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load account"})
 		return
 	}
@@ -1263,7 +1491,7 @@ func (s *Server) handleRedeemActivationCode(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "kod nie istnieje lub został już wykorzystany."})
 			return
 		}
-		log.Printf("redeem activation code %s for user %d: %v", code, user.ID, err)
+		s.logWithFields("error", "redeem activation code failed", logFields{"code": code, "user_id": user.ID, "error": err.Error()})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "nie udało się aktywować kodu"})
 		return
 	}
@@ -1347,7 +1575,7 @@ func (s *Server) handleUpdatePixel(c *gin.Context) {
 				status = http.StatusForbidden
 			default:
 				result.Error = "failed to update pixel"
-				log.Printf("update pixel %d: %v", item.ID, err)
+				s.logWithFields("error", "update pixel", logFields{"pixel_id": item.ID, "error": err.Error(), "user_id": user.ID})
 			}
 
 			if firstErrStatus == 0 {
@@ -1398,7 +1626,7 @@ func seedDemoPixels(ctx context.Context, store storage.Store) {
 
 	for _, pixel := range demo {
 		if _, err := store.UpdatePixel(ctx, pixel); err != nil {
-			log.Printf("seed pixel %d: %v", pixel.ID, err)
+			fmt.Fprintf(os.Stderr, "[seed] seed pixel %d: %v\n", pixel.ID, err)
 		}
 	}
 }

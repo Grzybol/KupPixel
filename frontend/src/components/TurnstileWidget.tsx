@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { loadTurnstile } from "../utils/turnstile";
+import { loadTurnstile, reportTurnstileDebug } from "../utils/turnstile";
 import { useI18n } from "../lang/I18nProvider";
 
 type TurnstileWidgetProps = {
@@ -57,6 +57,7 @@ export default function TurnstileWidget({
     const translate = translateRef.current;
 
     if (!siteKey) {
+      reportTurnstileDebug("widget:missing-sitekey", { status: "error" });
       const message = translate("auth.captcha.missing");
       setState("error");
       setErrorMessage(message);
@@ -69,12 +70,18 @@ export default function TurnstileWidget({
     setState("loading");
     setErrorMessage(null);
 
+    reportTurnstileDebug("widget:load:start", {
+      status: "pending",
+      meta: action ? { action } : undefined,
+    });
     loadTurnstile()
       .then(() => {
         if (!isActive) {
           return;
         }
+        reportTurnstileDebug("widget:load:resolved", { status: "success" });
         if (!containerRef.current || !window.turnstile) {
+          reportTurnstileDebug("widget:render:missing-container", { status: "error" });
           const message = translate("auth.captcha.error");
           setState("error");
           setErrorMessage(message);
@@ -95,10 +102,15 @@ export default function TurnstileWidget({
               onTokenChangeRef.current(token);
               setState("ready");
               setErrorMessage(null);
+              reportTurnstileDebug("widget:callback:token", {
+                status: "success",
+                detail: { tokenLength: token.length },
+              });
             },
             "expired-callback": () => {
               onTokenChangeRef.current("");
               onExpireRef.current?.();
+              reportTurnstileDebug("widget:callback:expired", { status: "expired" });
             },
             "error-callback": () => {
               const message = translate("auth.captcha.error");
@@ -106,9 +118,11 @@ export default function TurnstileWidget({
               setErrorMessage(message);
               onErrorRef.current?.(message);
               onTokenChangeRef.current("");
+              reportTurnstileDebug("widget:callback:error", { status: "error" });
             },
           });
           setState("ready");
+          reportTurnstileDebug("widget:render:success", { status: "success" });
         } catch (error) {
           console.error("turnstile render", error);
           const message = translate("auth.captcha.error");
@@ -116,6 +130,8 @@ export default function TurnstileWidget({
           setErrorMessage(message);
           onErrorRef.current?.(message);
           onTokenChangeRef.current("");
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          reportTurnstileDebug("widget:render:error", { status: "error", error: errorMessage });
         }
       })
       .catch((error) => {
@@ -128,16 +144,21 @@ export default function TurnstileWidget({
         setErrorMessage(message);
         onErrorRef.current?.(message);
         onTokenChangeRef.current("");
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        reportTurnstileDebug("widget:load:error", { status: "error", error: errorMessage });
       });
 
     return () => {
       isActive = false;
       onTokenChangeRef.current("");
+      reportTurnstileDebug("widget:cleanup", { status: "cleanup" });
       if (widgetIdRef.current && window.turnstile) {
         try {
           window.turnstile.remove(widgetIdRef.current);
         } catch (error) {
           console.error("turnstile cleanup", error);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          reportTurnstileDebug("widget:cleanup:error", { status: "error", error: errorMessage });
         }
       }
       widgetIdRef.current = null;

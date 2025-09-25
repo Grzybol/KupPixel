@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "tsc --project tsconfig.test.json && node dist-tests/tests/activationCode.test.js"
+    "test": "tsc --project tsconfig.test.json && node dist-tests/tests/activationCode.test.js && node dist-tests/tests/useAuth.test.js"
   },
   "dependencies": {
     "react": "^18.2.0",

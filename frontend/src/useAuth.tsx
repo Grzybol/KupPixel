@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useI18n } from "./lang/I18nProvider";
+import { useI18n } from "./lang/I18nProvider.js";
 
 export type AuthUser = {
   id?: number;
@@ -70,7 +70,7 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-function parseUser(data: unknown): AuthUser | null {
+export function parseUser(data: unknown): AuthUser | null {
   if (!data || typeof data !== "object") {
     return null;
   }
@@ -79,12 +79,13 @@ function parseUser(data: unknown): AuthUser | null {
   }
   if ("user" in data) {
     const nested = (data as Record<string, unknown>).user;
-    if (nested && typeof nested === "object" && "email" in nested) {
+    if (nested !== null && typeof nested === "object") {
       const record = nested as Record<string, unknown>;
-      if (typeof record.email === "string") {
+      if ("email" in record && typeof record.email === "string") {
         return record as AuthUser;
       }
     }
+    return null;
   }
   return null;
 }
@@ -142,6 +143,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
       console.error("refresh session", error);
       setUser(null);
       setPixelCostPoints(null);
+      if (error instanceof Error && error.name === "TypeError") {
+        return null;
+      }
       throw error;
     } finally {
       setIsLoading(false);

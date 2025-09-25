@@ -7,7 +7,14 @@ import {
   useMemo,
   useState,
 } from "react";
-import { LANGUAGE_STORAGE_KEY, LanguageCode, LanguageDefinition, TranslationDictionary, defaultLanguage, languages } from "./index";
+import {
+  LANGUAGE_STORAGE_KEY,
+  LanguageCode,
+  LanguageDefinition,
+  TranslationDictionary,
+  defaultLanguage,
+  languages,
+} from "./index.js";
 
 type TranslationParams = Record<string, string | number>;
 
@@ -32,7 +39,7 @@ function resolveTranslation(dictionary: TranslationDictionary, key: string): str
     if (!current || typeof current !== "object") {
       return undefined;
     }
-    const next = (current as TranslationDictionary)[segment];
+    const next: TranslationValue | undefined = (current as TranslationDictionary)[segment];
     if (next === undefined) {
       return undefined;
     }

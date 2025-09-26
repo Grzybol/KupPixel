@@ -20,7 +20,7 @@
       "register": "Zarejestruj się",
       "resend": "Wyślij ponownie",
       "save": "Zapisz",
-      "simulatePurchase": "Zasymuluj zakup",
+      "simulatePurchase": "Kup",
       "submit": "Wyślij"
     },
     "labels": {
@@ -194,8 +194,8 @@
     "matchDescription": "Wybierz kolor, który najlepiej reprezentuje Twoją markę – podgląd i wartość HEX aktualizują się automatycznie.",
     "colorPreviewLabel": "Podgląd koloru",
     "urlHint": "Po kliknięciu w piksel użytkownik zostanie przekierowany pod ten adres.",
-    "simulateSingle": "Zasymuluj zakup",
-    "simulateMultiple": "Zasymuluj zakup {{count}} pikseli",
+    "simulateSingle": "Kup",
+    "simulateMultiple": "Kup {{count}} pikseli",
     "costBreakdown": "{{count}} × {{price}} {{unit}} = {{total}} punktów",
     "singlePrice": "{{price}} {{unit}}",
     "successTitle": "Udało się!",
@@ -312,16 +312,19 @@
       {
         "title": "3. Zakup i zarządzanie pikselami",
         "paragraphs": [
-          "3.1. Użytkownik może nabywać piksele zgodnie z obowiązującym cennikiem, wyrażonym w punktach lub innych jednostkach wskazanych w serwisie.",
+          "3.1. Użytkownik może nabywać piksele jako usługę cyfrową dostarczaną niezwłocznie po opłaceniu lub aktywowaniu odpowiedniego kodu, zgodnie z obowiązującym cennikiem.",
           "3.2. Po nabyciu pikseli użytkownik może umieszczać na nich grafiki, linki oraz teksty, o ile nie naruszają one prawa, dobrych obyczajów ani praw osób trzecich.",
-          "3.3. Administrator zastrzega sobie prawo do odmowy publikacji lub usunięcia treści, które naruszają regulamin lub powszechnie obowiązujące przepisy. W takim przypadku użytkownikowi nie przysługuje zwrot poniesionych kosztów, jeżeli naruszenie wynikało z jego zawinionego działania."
+          "3.3. Składając dyspozycję zakupu, użytkownik żąda rozpoczęcia świadczenia usługi przed upływem ustawowego terminu odstąpienia i przyjmuje do wiadomości, że po pełnym wykonaniu usługi traci prawo odstąpienia zgodnie z obowiązującymi przepisami.",
+          "3.4. Świadczenie uważa się za wykonane z chwilą udostępnienia użytkownikowi możliwości zarządzania zakupionymi pikselami; od tego momentu płatność jest bezzwrotna, chyba że bezwzględnie obowiązujące przepisy stanowią inaczej.",
+          "3.5. Wszelkie zwroty lub odszkodowania mogą zostać przyznane wyłącznie w zakresie wyraźnie wymaganym przez prawo powszechnie obowiązujące."
         ]
       },
       {
         "title": "4. Minimalna odpowiedzialność",
         "paragraphs": [
-          "4.1. Administrator ponosi odpowiedzialność wobec użytkownika jedynie w granicach rzeczywistej szkody, będącej bezpośrednim i zawinionym następstwem niewykonania lub nienależytego wykonania usługi. Odpowiedzialność za utracone korzyści jest wyłączona w najszerszym dopuszczalnym przez prawo zakresie.",
-          "4.2. Administrator nie odpowiada za szkody wynikłe z:"
+          "4.1. Administrator ponosi odpowiedzialność wobec użytkowników wyłącznie w zakresie rzeczywistej szkody wynikłej z winy umyślnej lub rażącego niedbalstwa, z wyłączeniem utraconych korzyści w najszerszym dopuszczalnym przez prawo zakresie.",
+          "4.2. W granicach dopuszczonych przez prawo odpowiedzialność Administratora za inne szkody jest wyłączona, a ewentualne roszczenia podlegają ograniczeniom wynikającym z bezwzględnie obowiązujących przepisów.",
+          "4.3. Administrator nie odpowiada za szkody wynikłe z:"
         ],
         "list": [
           "działań lub zaniechań użytkownika lub osób trzecich,",
@@ -332,8 +335,9 @@
       {
         "title": "5. Brak gwarancji",
         "paragraphs": [
-          "5.1. Serwis KupPixel świadczony jest w stanie „takim, jaki jest”. Administrator nie udziela żadnej gwarancji, w tym gwarancji przydatności do określonego celu, ciągłej dostępności czy bezbłędnego działania serwisu.",
-          "5.2. Administrator nie gwarantuje skuteczności działań marketingowych prowadzonych przez użytkownika przy użyciu nabytych pikseli ani liczby odwiedzin generowanych przez linki."
+          "5.1. Serwis KupPixel świadczony jest w stanie „takim, jaki jest”. Administrator nie udziela żadnych gwarancji, w tym gwarancji przydatności do określonego celu, ciągłej dostępności czy bezbłędnego działania serwisu, chyba że obowiązujące przepisy stanowią inaczej.",
+          "5.2. W najszerszym dopuszczalnym zakresie Administrator wyłącza wszelkie rękojmie i zapewnienia dotyczące usług cyfrowych, w szczególności nie gwarantuje skuteczności działań marketingowych prowadzonych przez użytkownika przy użyciu nabytych pikseli ani liczby odwiedzin generowanych przez linki.",
+          "5.3. Żadne postanowienie Regulaminu nie wyłącza ani nie ogranicza uprawnień użytkownika, których ograniczenie lub wyłączenie jest niedozwolone na mocy prawa."
         ]
       },
       {

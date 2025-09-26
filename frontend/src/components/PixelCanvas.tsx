@@ -557,7 +557,9 @@ export default function PixelCanvas({
         style={{
           imageRendering: "pixelated",
           aspectRatio: `${width} / ${height}`,
-          backgroundColor: "#111827"
+          backgroundColor: "#111827",
+          touchAction: "none",
+          overscrollBehavior: "contain",
         }}
       />
       {selectionRect && (

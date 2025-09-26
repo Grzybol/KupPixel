@@ -86,11 +86,66 @@ type turnstileVerifier func(ctx context.Context, secret, token, remoteIP string)
 
 type logFields map[string]any
 
-const turnstileRequestIDKey = "turnstile.request_id"
+const (
+	turnstileRequestIDKey = "turnstile.request_id"
+	transactionIDKey      = "transactionID"
+)
 
 type contextKey string
 
 var turnstileRequestIDContextKey = contextKey(turnstileRequestIDKey)
+var transactionIDContextKey = contextKey(transactionIDKey)
+
+func newTransactionID() string {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(buf)
+}
+
+func attachTransactionID(c *gin.Context, id string) {
+	if c == nil || id == "" {
+		return
+	}
+	c.Set(transactionIDKey, id)
+	if c.Request != nil {
+		ctx := context.WithValue(c.Request.Context(), transactionIDContextKey, id)
+		c.Request = c.Request.WithContext(ctx)
+	}
+}
+
+func transactionIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if value := ctx.Value(transactionIDContextKey); value != nil {
+		if id, ok := value.(string); ok {
+			return strings.TrimSpace(id)
+		}
+	}
+	return ""
+}
+
+func transactionIDFromGin(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	if value, exists := c.Get(transactionIDKey); exists {
+		if id, ok := value.(string); ok {
+			trimmed := strings.TrimSpace(id)
+			if trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	if c.Request != nil {
+		if id := transactionIDFromContext(c.Request.Context()); id != "" {
+			return id
+		}
+	}
+	return ""
+}
 
 func (s *Server) logWithFields(level, message string, fields logFields) {
 	if s == nil {
@@ -131,6 +186,20 @@ func (s *Server) logWithFields(level, message string, fields logFields) {
 
 func (s *Server) logf(level, format string, args ...interface{}) {
 	s.logWithFields(level, fmt.Sprintf(format, args...), nil)
+}
+
+func (s *Server) logWithContext(c *gin.Context, level, message string, fields logFields) {
+	data := make(logFields, len(fields)+1)
+	for k, v := range fields {
+		if k == "" || v == nil {
+			continue
+		}
+		data[k] = v
+	}
+	if id := transactionIDFromGin(c); id != "" {
+		data[transactionIDKey] = id
+	}
+	s.logWithFields(level, message, data)
 }
 
 func (s *Server) logInfof(format string, args ...interface{}) {
@@ -214,7 +283,7 @@ func (s *Server) logTurnstileEvent(c *gin.Context, level, stage, message string,
 	if id := ensureTurnstileRequestID(c); id != "" {
 		data["turnstile_request_id"] = id
 	}
-	s.logWithFields(level, message, data)
+	s.logWithContext(c, level, message, data)
 }
 func NewSessionManager() *SessionManager {
 	return &SessionManager{sessions: make(map[string]int64)}
@@ -500,7 +569,7 @@ func buildPasswordResetLink(base string, token string) (string, error) {
 func (s *Server) getSessionUser(c *gin.Context) (storage.User, string, bool) {
 	sessionID, ok, err := readSessionCookie(c.Request)
 	if err != nil {
-		s.logWarnf("read session cookie: %v", err)
+		s.logWithContext(c, "warn", "session: read cookie failed", logFields{"error": err.Error()})
 		return storage.User{}, "", false
 	}
 	if !ok {
@@ -517,7 +586,7 @@ func (s *Server) getSessionUser(c *gin.Context) (storage.User, string, bool) {
 		if errors.Is(err, sql.ErrNoRows) {
 			return storage.User{}, sessionID, false
 		}
-		s.logErrorf("load user %d: %v", userID, err)
+		s.logWithContext(c, "error", "session: load user failed", logFields{"user_id": userID, "error": err.Error()})
 		return storage.User{}, sessionID, false
 	}
 
@@ -765,6 +834,16 @@ func main() {
 	seedDemoPixels(ctx, store)
 
 	router := gin.Default()
+	router.Use(func(c *gin.Context) {
+		id := transactionIDFromGin(c)
+		if id == "" {
+			id = newTransactionID()
+		}
+		if id != "" {
+			attachTransactionID(c, id)
+		}
+		c.Next()
+	})
 	verificationBaseURL := strings.TrimSpace(os.Getenv("VERIFICATION_LINK_BASE_URL"))
 	if verificationBaseURL == "" {
 		verificationBaseURL = strings.TrimSpace(cfg.Verification.BaseURL)
@@ -899,7 +978,7 @@ func main() {
 func (s *Server) handleGetPixels(c *gin.Context) {
 	state, err := s.store.GetAllPixels(c.Request.Context())
 	if err != nil {
-		s.logErrorf("get pixels: %v", err)
+		s.logWithContext(c, "error", "get pixels: load failed", logFields{"error": err.Error()})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load pixels"})
 		return
 	}
@@ -907,29 +986,58 @@ func (s *Server) handleGetPixels(c *gin.Context) {
 }
 
 func (s *Server) handleRegister(c *gin.Context) {
+	const operation = "register"
+
+	s.logWithContext(c, "info", "register: request received", logFields{"operation": operation})
+
 	var req authRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		s.logWithContext(c, "warn", "register: invalid payload", logFields{"operation": operation, "error": err.Error()})
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
 
 	email := strings.TrimSpace(strings.ToLower(req.Email))
 	password := strings.TrimSpace(req.Password)
+	baseFields := logFields{
+		"operation":               operation,
+		"email":                   email,
+		"turnstile_token_present": strings.TrimSpace(req.Token) != "",
+	}
+	cloneFields := func(extra logFields) logFields {
+		merged := make(logFields, len(baseFields))
+		for k, v := range baseFields {
+			merged[k] = v
+		}
+		for k, v := range extra {
+			merged[k] = v
+		}
+		return merged
+	}
+
 	if email == "" || password == "" {
+		s.logWithContext(c, "warn", "register: missing email or password", cloneFields(nil))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "email and password are required"})
 		return
 	}
 
+	s.logWithContext(c, "info", "register: payload validated", cloneFields(nil))
+
 	if !s.requireTurnstile(c, req.Token) {
+		s.logWithContext(c, "warn", "register: turnstile verification rejected", cloneFields(nil))
 		return
 	}
 
+	s.logWithContext(c, "info", "register: turnstile verification passed", cloneFields(nil))
+
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		s.logErrorf("hash password: %v", err)
+		s.logWithContext(c, "error", "register: hash password failed", cloneFields(logFields{"error": err.Error()}))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create user"})
 		return
 	}
+
+	s.logWithContext(c, "info", "register: password hashed", cloneFields(nil))
 
 	user, err := s.store.CreateUser(c.Request.Context(), email, string(hash))
 	if err != nil {
@@ -937,168 +1045,208 @@ func (s *Server) handleRegister(c *gin.Context) {
 			existing, getErr := s.store.GetUserByEmail(c.Request.Context(), email)
 			if getErr != nil {
 				if errors.Is(getErr, sql.ErrNoRows) {
+					s.logWithContext(c, "warn", "register: duplicate email without persisted user", cloneFields(logFields{"lookup_error": getErr.Error()}))
 					c.JSON(http.StatusConflict, gin.H{"error": "user already exists"})
 					return
 				}
-				s.logErrorf("get user after duplicate registration: %v", getErr)
+				s.logWithContext(c, "error", "register: get existing user failed", cloneFields(logFields{"error": getErr.Error()}))
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create user"})
 				return
 			}
 
 			if existing.IsVerified || s.disableVerificationEmail {
+				s.logWithContext(c, "warn", "register: user already verified", cloneFields(logFields{"user_id": existing.ID}))
 				c.JSON(http.StatusConflict, gin.H{"error": "user already exists"})
 				return
 			}
 
-			s.logWithFields("info", "register: existing unverified user found", logFields{"user_id": existing.ID, "email": existing.Email})
+			s.logWithContext(c, "info", "register: existing unverified user found", cloneFields(logFields{"user_id": existing.ID}))
 
 			token, issueErr := s.issueVerificationToken(c.Request.Context(), existing)
 			if issueErr != nil {
-				s.logErrorf("issue verification token (duplicate register): %v", issueErr)
+				s.logWithContext(c, "error", "register: issue verification token for existing user failed", cloneFields(logFields{"user_id": existing.ID, "error": issueErr.Error()}))
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 				return
 			}
 
-			s.logWithFields("info", "register: issued verification token for existing user", logFields{"user_id": existing.ID})
+			s.logWithContext(c, "info", "register: verification token issued for existing user", cloneFields(logFields{"user_id": existing.ID}))
 
 			link, linkErr := buildVerificationLink(s.verificationBaseURL, token)
 			if linkErr != nil {
-				s.logErrorf("build verification link (duplicate register): %v", linkErr)
+				s.logWithContext(c, "error", "register: build verification link for existing user failed", cloneFields(logFields{"user_id": existing.ID, "error": linkErr.Error()}))
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 				return
 			}
 
-			s.logWithFields("info", "register: sending verification email (duplicate)", logFields{"email": existing.Email})
+			s.logWithContext(c, "info", "register: sending verification email for existing user", cloneFields(logFields{"user_id": existing.ID}))
 
 			if sendErr := s.mailer.SendVerificationEmail(c.Request.Context(), existing.Email, link); sendErr != nil {
-				s.logErrorf("send verification email (duplicate register): %v", sendErr)
+				s.logWithContext(c, "error", "register: send verification email for existing user failed", cloneFields(logFields{"user_id": existing.ID, "error": sendErr.Error()}))
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send verification email"})
 				return
 			}
+
+			s.logWithContext(c, "info", "register: verification email sent for existing user", cloneFields(logFields{"user_id": existing.ID}))
 
 			c.JSON(http.StatusAccepted, gin.H{
 				"message": "Konto już istnieje. Wysłaliśmy nowy link aktywacyjny na Twój adres e-mail.",
 			})
 			return
 		}
-		s.logErrorf("create user: %v", err)
+		s.logWithContext(c, "error", "register: create user failed", cloneFields(logFields{"error": err.Error()}))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create user"})
 		return
 	}
 
-	s.logWithFields("info", "register: created new user", logFields{"user_id": user.ID, "email": user.Email, "disable_verification_email": s.disableVerificationEmail})
+	s.logWithContext(c, "info", "register: new user created", cloneFields(logFields{"user_id": user.ID, "disable_verification_email": s.disableVerificationEmail}))
 
 	if s.disableVerificationEmail {
 		if err := s.store.MarkUserVerified(c.Request.Context(), user.ID); err != nil {
-			s.logErrorf("auto-verify user: %v", err)
+			s.logWithContext(c, "error", "register: auto-verify user failed", cloneFields(logFields{"user_id": user.ID, "error": err.Error()}))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify user"})
 			return
 		}
 		if err := s.store.DeleteVerificationTokensForUser(c.Request.Context(), user.ID); err != nil {
-			s.logWarnf("cleanup verification tokens after auto verify: %v", err)
+			s.logWithContext(c, "warn", "register: cleanup verification tokens after auto verify failed", cloneFields(logFields{"user_id": user.ID, "error": err.Error()}))
 		}
+		s.logWithContext(c, "info", "register: auto verification completed", cloneFields(logFields{"user_id": user.ID}))
 		c.JSON(http.StatusCreated, gin.H{
 			"message": "Konto zostało utworzone i jest już potwierdzone. Możesz się zalogować.",
 		})
 		return
 	}
 
-	s.logWithFields("info", "register: issuing verification token", logFields{"user_id": user.ID})
+	s.logWithContext(c, "info", "register: issuing verification token", cloneFields(logFields{"user_id": user.ID}))
 
 	token, err := s.issueVerificationToken(c.Request.Context(), user)
 	if err != nil {
-		s.logErrorf("issue verification token: %v", err)
+		s.logWithContext(c, "error", "register: issue verification token failed", cloneFields(logFields{"user_id": user.ID, "error": err.Error()}))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 		return
 	}
 
-	s.logWithFields("info", "register: verification token issued", logFields{"user_id": user.ID})
+	s.logWithContext(c, "info", "register: verification token issued", cloneFields(logFields{"user_id": user.ID}))
 
 	link, err := buildVerificationLink(s.verificationBaseURL, token)
 	if err != nil {
-		s.logErrorf("build verification link: %v", err)
+		s.logWithContext(c, "error", "register: build verification link failed", cloneFields(logFields{"user_id": user.ID, "error": err.Error()}))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 		return
 	}
 
-	s.logWithFields("info", "register: sending verification email", logFields{"email": user.Email, "user_id": user.ID})
+	s.logWithContext(c, "info", "register: sending verification email", cloneFields(logFields{"user_id": user.ID}))
 
 	if err := s.mailer.SendVerificationEmail(c.Request.Context(), user.Email, link); err != nil {
-		s.logErrorf("send verification email: %v", err)
+		s.logWithContext(c, "error", "register: send verification email failed", cloneFields(logFields{"user_id": user.ID, "error": err.Error()}))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send verification email"})
 		return
 	}
+
+	s.logWithContext(c, "info", "register: verification email sent", cloneFields(logFields{"user_id": user.ID}))
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "Konto zostało utworzone. Sprawdź skrzynkę e-mail i potwierdź adres, aby się zalogować.",
 	})
 }
-
 func (s *Server) handleLogin(c *gin.Context) {
+	const operation = "login"
+
+	s.logWithContext(c, "info", "login: request received", logFields{"operation": operation})
+
 	var req authRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		s.logWithContext(c, "warn", "login: invalid payload", logFields{"operation": operation, "error": err.Error()})
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
 
 	email := strings.TrimSpace(strings.ToLower(req.Email))
 	password := strings.TrimSpace(req.Password)
+	baseFields := logFields{
+		"operation":               operation,
+		"email":                   email,
+		"turnstile_token_present": strings.TrimSpace(req.Token) != "",
+	}
+	cloneFields := func(extra logFields) logFields {
+		merged := make(logFields, len(baseFields))
+		for k, v := range baseFields {
+			merged[k] = v
+		}
+		for k, v := range extra {
+			merged[k] = v
+		}
+		return merged
+	}
+
 	if email == "" || password == "" {
+		s.logWithContext(c, "warn", "login: missing email or password", cloneFields(nil))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "email and password are required"})
 		return
 	}
 
+	s.logWithContext(c, "info", "login: payload validated", cloneFields(nil))
+
 	if !s.requireTurnstile(c, req.Token) {
+		s.logWithContext(c, "warn", "login: turnstile verification rejected", cloneFields(nil))
 		return
 	}
+
+	s.logWithContext(c, "info", "login: turnstile verification passed", cloneFields(nil))
 
 	user, err := s.store.GetUserByEmail(c.Request.Context(), email)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			s.logWithContext(c, "warn", "login: user not found", cloneFields(nil))
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 			return
 		}
-		s.logErrorf("get user: %v", err)
+		s.logWithContext(c, "error", "login: get user failed", cloneFields(logFields{"error": err.Error()}))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to login"})
 		return
 	}
 
+	userFields := cloneFields(logFields{"user_id": user.ID, "verified": user.IsVerified})
+
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+		s.logWithContext(c, "warn", "login: invalid credentials", userFields)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
 
 	if !user.IsVerified {
 		if s.disableVerificationEmail {
+			s.logWithContext(c, "warn", "login: unverified user denied", userFields)
 			c.JSON(http.StatusForbidden, gin.H{"error": "konto nie zostało jeszcze potwierdzone. Sprawdź skrzynkę e-mail."})
 			return
 		}
 
-		s.logWithFields("info", "login: unverified user attempting login", logFields{"user_id": user.ID, "email": user.Email})
+		s.logWithContext(c, "info", "login: unverified user attempting login", userFields)
 
 		token, err := s.issueVerificationToken(c.Request.Context(), user)
 		if err != nil {
-			s.logErrorf("issue verification token (login): %v", err)
+			s.logWithContext(c, "error", "login: issue verification token failed", cloneFields(logFields{"user_id": user.ID, "error": err.Error()}))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 			return
 		}
 
-		s.logWithFields("info", "login: verification token issued", logFields{"user_id": user.ID})
+		s.logWithContext(c, "info", "login: verification token issued", cloneFields(logFields{"user_id": user.ID}))
 
 		link, err := buildVerificationLink(s.verificationBaseURL, token)
 		if err != nil {
-			s.logErrorf("build verification link (login): %v", err)
+			s.logWithContext(c, "error", "login: build verification link failed", cloneFields(logFields{"user_id": user.ID, "error": err.Error()}))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 			return
 		}
 
-		s.logWithFields("info", "login: sending verification email", logFields{"email": user.Email, "user_id": user.ID})
+		s.logWithContext(c, "info", "login: sending verification email", cloneFields(logFields{"user_id": user.ID}))
 
 		if err := s.mailer.SendVerificationEmail(c.Request.Context(), user.Email, link); err != nil {
-			s.logErrorf("send verification email (login): %v", err)
+			s.logWithContext(c, "error", "login: send verification email failed", cloneFields(logFields{"user_id": user.ID, "error": err.Error()}))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send verification email"})
 			return
 		}
+
+		s.logWithContext(c, "info", "login: verification email sent", cloneFields(logFields{"user_id": user.ID}))
 
 		c.JSON(http.StatusForbidden, gin.H{"error": "konto nie zostało jeszcze potwierdzone. Nowy link weryfikacyjny został wysłany na adres e-mail."})
 		return
@@ -1106,15 +1254,16 @@ func (s *Server) handleLogin(c *gin.Context) {
 
 	sessionID, err := s.sessions.Create(user.ID)
 	if err != nil {
-		s.logErrorf("create session: %v", err)
+		s.logWithContext(c, "error", "login: create session failed", cloneFields(logFields{"user_id": user.ID, "error": err.Error()}))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
 		return
 	}
 	setSessionCookie(c, sessionID)
 
+	s.logWithContext(c, "info", "login: success", cloneFields(logFields{"user_id": user.ID}))
+
 	c.JSON(http.StatusOK, gin.H{"user": sanitizeUser(user), "pixel_cost_points": s.pixelCostPoints})
 }
-
 func (s *Server) issueVerificationToken(ctx context.Context, user storage.User) (string, error) {
 	if s.disableVerificationEmail {
 		return "", errors.New("email verification disabled")
@@ -1195,12 +1344,18 @@ func (s *Server) issuePasswordResetToken(ctx context.Context, user storage.User)
 }
 
 func (s *Server) handleVerifyAccount(c *gin.Context) {
+	const operation = "verify_account"
+
 	if s.disableVerificationEmail {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Weryfikacja adresów e-mail jest wyłączona."})
 		return
 	}
+
+	s.logWithContext(c, "info", "verify account: request received", logFields{"operation": operation})
+
 	token := strings.TrimSpace(c.Request.URL.Query().Get("token"))
 	if token == "" {
+		s.logWithContext(c, "warn", "verify account: missing token", logFields{"operation": operation})
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing token"})
 		return
 	}
@@ -1208,159 +1363,234 @@ func (s *Server) handleVerifyAccount(c *gin.Context) {
 	record, err := s.store.GetVerificationToken(c.Request.Context(), token)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			s.logWithContext(c, "warn", "verify account: token not found", logFields{"operation": operation})
 			c.JSON(http.StatusBadRequest, gin.H{"error": "nieprawidłowy lub wykorzystany token"})
 			return
 		}
-		s.logErrorf("get verification token: %v", err)
+		s.logWithContext(c, "error", "verify account: get token failed", logFields{"operation": operation, "error": err.Error()})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify account"})
 		return
 	}
 
+	fields := logFields{"operation": operation, "user_id": record.UserID, "expires_at": record.ExpiresAt.Format(time.RFC3339)}
+
 	if time.Now().After(record.ExpiresAt) {
-		_ = s.store.DeleteVerificationToken(c.Request.Context(), token)
+		s.logWithContext(c, "warn", "verify account: token expired", fields)
+		if delErr := s.store.DeleteVerificationToken(c.Request.Context(), token); delErr != nil {
+			s.logWithContext(c, "warn", "verify account: cleanup expired token failed", logFields{"operation": operation, "error": delErr.Error()})
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "token wygasł. Poproś o nowy link weryfikacyjny."})
 		return
 	}
 
 	if err := s.store.MarkUserVerified(c.Request.Context(), record.UserID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			s.logWithContext(c, "warn", "verify account: user not found", fields)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "konto nie istnieje"})
 			return
 		}
-		s.logErrorf("mark user verified: %v", err)
+		s.logWithContext(c, "error", "verify account: mark user verified failed", logFields{"operation": operation, "user_id": record.UserID, "error": err.Error()})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify account"})
 		return
 	}
 
 	if err := s.store.DeleteVerificationTokensForUser(c.Request.Context(), record.UserID); err != nil {
-		s.logWarnf("cleanup verification tokens: %v", err)
+		s.logWithContext(c, "warn", "verify account: cleanup tokens failed", logFields{"operation": operation, "user_id": record.UserID, "error": err.Error()})
 	}
+
+	s.logWithContext(c, "info", "verify account: success", fields)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Adres e-mail został potwierdzony. Możesz się teraz zalogować."})
 }
-
 func (s *Server) handleResendVerification(c *gin.Context) {
+	const operation = "resend_verification"
+
 	if s.disableVerificationEmail {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Konto jest już potwierdzone."})
 		return
 	}
+
+	s.logWithContext(c, "info", "resend verification: request received", logFields{"operation": operation})
+
 	var req authRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		s.logWithContext(c, "warn", "resend verification: invalid payload", logFields{"operation": operation, "error": err.Error()})
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
 
 	email := strings.TrimSpace(strings.ToLower(req.Email))
+	baseFields := logFields{
+		"operation":               operation,
+		"email":                   email,
+		"turnstile_token_present": strings.TrimSpace(req.Token) != "",
+	}
+	cloneFields := func(extra logFields) logFields {
+		merged := make(logFields, len(baseFields))
+		for k, v := range baseFields {
+			merged[k] = v
+		}
+		for k, v := range extra {
+			merged[k] = v
+		}
+		return merged
+	}
+
 	if email == "" {
+		s.logWithContext(c, "warn", "resend verification: missing email", cloneFields(nil))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "email is required"})
 		return
 	}
 
 	if !s.requireTurnstile(c, req.Token) {
+		s.logWithContext(c, "warn", "resend verification: turnstile verification rejected", cloneFields(nil))
 		return
 	}
 
 	user, err := s.store.GetUserByEmail(c.Request.Context(), email)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			s.logWithContext(c, "warn", "resend verification: user not found", cloneFields(nil))
 			c.JSON(http.StatusNotFound, gin.H{"error": "konto z tym adresem e-mail nie istnieje"})
 			return
 		}
-		s.logErrorf("get user for resend: %v", err)
+		s.logWithContext(c, "error", "resend verification: get user failed", cloneFields(logFields{"error": err.Error()}))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process request"})
 		return
 	}
 
+	userFields := cloneFields(logFields{"user_id": user.ID, "verified": user.IsVerified})
+
 	if user.IsVerified {
+		s.logWithContext(c, "info", "resend verification: user already verified", userFields)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "konto jest już potwierdzone"})
 		return
 	}
 
-	s.logWithFields("info", "resend: issuing verification token", logFields{"user_id": user.ID})
+	s.logWithContext(c, "info", "resend verification: issuing token", userFields)
 
 	token, err := s.issueVerificationToken(c.Request.Context(), user)
 	if err != nil {
-		s.logErrorf("issue verification token (resend): %v", err)
+		s.logWithContext(c, "error", "resend verification: issue token failed", cloneFields(logFields{"user_id": user.ID, "error": err.Error()}))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 		return
 	}
 
-	s.logWithFields("info", "resend: verification token issued", logFields{"user_id": user.ID})
+	s.logWithContext(c, "info", "resend verification: token issued", cloneFields(logFields{"user_id": user.ID}))
 
 	link, err := buildVerificationLink(s.verificationBaseURL, token)
 	if err != nil {
-		s.logErrorf("build verification link (resend): %v", err)
+		s.logWithContext(c, "error", "resend verification: build link failed", cloneFields(logFields{"user_id": user.ID, "error": err.Error()}))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare verification"})
 		return
 	}
 
-	s.logWithFields("info", "resend: sending verification email", logFields{"email": user.Email, "user_id": user.ID})
+	s.logWithContext(c, "info", "resend verification: sending email", cloneFields(logFields{"user_id": user.ID}))
 
 	if err := s.mailer.SendVerificationEmail(c.Request.Context(), user.Email, link); err != nil {
-		s.logErrorf("send verification email (resend): %v", err)
+		s.logWithContext(c, "error", "resend verification: send email failed", cloneFields(logFields{"user_id": user.ID, "error": err.Error()}))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send verification email"})
 		return
 	}
 
+	s.logWithContext(c, "info", "resend verification: email sent", cloneFields(logFields{"user_id": user.ID}))
+
 	c.JSON(http.StatusOK, gin.H{"message": "Nowy link weryfikacyjny został wysłany."})
 }
-
 func (s *Server) handlePasswordResetRequest(c *gin.Context) {
+	const operation = "password_reset_request"
+
+	s.logWithContext(c, "info", "password reset request: received", logFields{"operation": operation})
+
 	var req passwordResetRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		s.logWithContext(c, "warn", "password reset request: invalid payload", logFields{"operation": operation, "error": err.Error()})
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
 
 	email := strings.TrimSpace(strings.ToLower(req.Email))
+	baseFields := logFields{
+		"operation":               operation,
+		"email":                   email,
+		"turnstile_token_present": strings.TrimSpace(req.Token) != "",
+	}
+	cloneFields := func(extra logFields) logFields {
+		merged := make(logFields, len(baseFields))
+		for k, v := range baseFields {
+			merged[k] = v
+		}
+		for k, v := range extra {
+			merged[k] = v
+		}
+		return merged
+	}
+
 	if email == "" {
+		s.logWithContext(c, "warn", "password reset request: missing email", cloneFields(nil))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "email is required"})
 		return
 	}
 
 	if !s.requireTurnstile(c, req.Token) {
+		s.logWithContext(c, "warn", "password reset request: turnstile verification rejected", cloneFields(nil))
 		return
 	}
+
+	s.logWithContext(c, "info", "password reset request: turnstile verification passed", cloneFields(nil))
 
 	const responseMessage = "Jeśli konto istnieje, wysłaliśmy instrukcje resetu hasła."
 
 	user, err := s.store.GetUserByEmail(c.Request.Context(), email)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			s.logWithContext(c, "info", "password reset request: user not found", cloneFields(nil))
 			c.JSON(http.StatusAccepted, gin.H{"message": responseMessage})
 			return
 		}
-		s.logErrorf("get user for password reset: %v", err)
+		s.logWithContext(c, "error", "password reset request: get user failed", cloneFields(logFields{"error": err.Error()}))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process request"})
 		return
 	}
 
+	s.logWithContext(c, "info", "password reset request: issuing token", cloneFields(logFields{"user_id": user.ID}))
+
 	token, err := s.issuePasswordResetToken(c.Request.Context(), user)
 	if err != nil {
-		s.logErrorf("issue password reset token: %v", err)
+		s.logWithContext(c, "error", "password reset request: issue token failed", cloneFields(logFields{"user_id": user.ID, "error": err.Error()}))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare reset"})
 		return
 	}
+
+	s.logWithContext(c, "info", "password reset request: token issued", cloneFields(logFields{"user_id": user.ID}))
 
 	link, err := buildPasswordResetLink(s.passwordResetBaseURL, token)
 	if err != nil {
-		s.logErrorf("build password reset link: %v", err)
+		s.logWithContext(c, "error", "password reset request: build link failed", cloneFields(logFields{"user_id": user.ID, "error": err.Error()}))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare reset"})
 		return
 	}
 
+	s.logWithContext(c, "info", "password reset request: sending email", cloneFields(logFields{"user_id": user.ID}))
+
 	if err := s.mailer.SendPasswordResetEmail(c.Request.Context(), user.Email, link); err != nil {
-		s.logErrorf("send password reset email: %v", err)
+		s.logWithContext(c, "error", "password reset request: send email failed", cloneFields(logFields{"user_id": user.ID, "error": err.Error()}))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send reset email"})
 		return
 	}
 
+	s.logWithContext(c, "info", "password reset request: email sent", cloneFields(logFields{"user_id": user.ID}))
+
 	c.JSON(http.StatusAccepted, gin.H{"message": responseMessage})
 }
-
 func (s *Server) handlePasswordResetConfirm(c *gin.Context) {
+	const operation = "password_reset_confirm"
+
+	s.logWithContext(c, "info", "password reset confirm: received", logFields{"operation": operation})
+
 	var req passwordResetConfirmRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		s.logWithContext(c, "warn", "password reset confirm: invalid payload", logFields{"operation": operation, "error": err.Error()})
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
@@ -1368,34 +1598,59 @@ func (s *Server) handlePasswordResetConfirm(c *gin.Context) {
 	token := strings.TrimSpace(req.Token)
 	password := strings.TrimSpace(req.Password)
 	confirm := strings.TrimSpace(req.ConfirmPassword)
+	baseFields := logFields{
+		"operation":               operation,
+		"token_provided":          token != "",
+		"turnstile_token_present": strings.TrimSpace(req.TurnstileToken) != "",
+	}
+	cloneFields := func(extra logFields) logFields {
+		merged := make(logFields, len(baseFields))
+		for k, v := range baseFields {
+			merged[k] = v
+		}
+		for k, v := range extra {
+			merged[k] = v
+		}
+		return merged
+	}
+
 	if token == "" || password == "" || confirm == "" {
+		s.logWithContext(c, "warn", "password reset confirm: missing fields", cloneFields(nil))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "token and password are required"})
 		return
 	}
 
 	if password != confirm {
+		s.logWithContext(c, "warn", "password reset confirm: passwords mismatch", cloneFields(nil))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "hasła muszą być takie same"})
 		return
 	}
 
 	if !s.requireTurnstile(c, req.TurnstileToken) {
+		s.logWithContext(c, "warn", "password reset confirm: turnstile verification rejected", cloneFields(nil))
 		return
 	}
+
+	s.logWithContext(c, "info", "password reset confirm: turnstile verification passed", cloneFields(nil))
 
 	record, err := s.store.GetPasswordResetToken(c.Request.Context(), token)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			s.logWithContext(c, "warn", "password reset confirm: token not found", cloneFields(nil))
 			c.JSON(http.StatusBadRequest, gin.H{"error": "nieprawidłowy lub wykorzystany token"})
 			return
 		}
-		s.logErrorf("get password reset token: %v", err)
+		s.logWithContext(c, "error", "password reset confirm: get token failed", cloneFields(logFields{"error": err.Error()}))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reset password"})
 		return
 	}
 
+	fieldsWithUser := cloneFields(logFields{"user_id": record.UserID, "expires_at": record.ExpiresAt.Format(time.RFC3339)})
+
 	if time.Now().After(record.ExpiresAt) {
+		s.logWithContext(c, "warn", "password reset confirm: token expired", fieldsWithUser)
 		if delErr := s.store.DeletePasswordResetToken(c.Request.Context(), token); delErr != nil {
-			s.logWarnf("cleanup expired password reset token: %v", delErr)
+			s.logWithContext(c, "warn", "password reset confirm: cleanup expired token failed", cloneFields(logFields{"error": delErr.Error()}))
 		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "token wygasł. Poproś o nowy link resetu hasła."})
 		return
@@ -1403,35 +1658,38 @@ func (s *Server) handlePasswordResetConfirm(c *gin.Context) {
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		s.logErrorf("hash password reset: %v", err)
+		s.logWithContext(c, "error", "password reset confirm: hash password failed", fieldsWithUser)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reset password"})
 		return
 	}
 
 	if err := s.store.UpdateUserPassword(c.Request.Context(), record.UserID, string(hash)); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			s.logWithContext(c, "warn", "password reset confirm: user not found", fieldsWithUser)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "konto nie istnieje"})
 			return
 		}
-		s.logErrorf("update user password: %v", err)
+		s.logWithContext(c, "error", "password reset confirm: update password failed", cloneFields(logFields{"user_id": record.UserID, "error": err.Error()}))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reset password"})
 		return
 	}
 
 	if err := s.store.DeletePasswordResetTokensForUser(c.Request.Context(), record.UserID); err != nil {
-		s.logWarnf("cleanup password reset tokens for user_id=%d: %v", record.UserID, err)
+		s.logWithContext(c, "warn", "password reset confirm: cleanup tokens failed", cloneFields(logFields{"user_id": record.UserID, "error": err.Error()}))
 	}
+
+	s.logWithContext(c, "info", "password reset confirm: success", cloneFields(logFields{"user_id": record.UserID}))
 
 	c.JSON(http.StatusOK, gin.H{"message": "Hasło zostało zaktualizowane."})
 }
-
 func (s *Server) handleLogout(c *gin.Context) {
 	sessionID, ok, err := readSessionCookie(c.Request)
 	if err != nil {
-		s.logWarnf("read session cookie: %v", err)
+		s.logWithContext(c, "warn", "logout: read session cookie failed", logFields{"error": err.Error()})
 	}
 	if ok {
 		s.sessions.Delete(sessionID)
+		s.logWithContext(c, "info", "logout: session cleared", logFields{"session_present": ok})
 	}
 	clearSessionCookie(c)
 	c.Status(http.StatusNoContent)
@@ -1458,7 +1716,7 @@ func (s *Server) handleAccount(c *gin.Context) {
 
 	pixels, err := s.store.GetPixelsByOwner(c.Request.Context(), user.ID)
 	if err != nil {
-		s.logErrorf("get pixels for user %d: %v", user.ID, err)
+		s.logWithContext(c, "error", "account: load pixels failed", logFields{"user_id": user.ID, "error": err.Error()})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load account"})
 		return
 	}
@@ -1471,37 +1729,47 @@ func (s *Server) handleAccount(c *gin.Context) {
 }
 
 func (s *Server) handleRedeemActivationCode(c *gin.Context) {
+	const operation = "redeem_activation_code"
+
 	user, ok := s.requireUser(c)
 	if !ok {
 		return
 	}
 
+	s.logWithContext(c, "info", "redeem activation code: request received", logFields{"operation": operation, "user_id": user.ID})
+
 	var req activationCodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		s.logWithContext(c, "warn", "redeem activation code: invalid payload", logFields{"operation": operation, "user_id": user.ID, "error": err.Error()})
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
 
 	code := strings.ToUpper(strings.TrimSpace(req.Code))
 	if !activationCodePattern.MatchString(code) {
+		s.logWithContext(c, "warn", "redeem activation code: invalid format", logFields{"operation": operation, "user_id": user.ID, "code": code})
 		c.JSON(http.StatusBadRequest, gin.H{"error": "nieprawidłowy format kodu. Użyj xxxx-xxxx-xxxx-xxxx."})
 		return
 	}
 
 	if !s.requireTurnstile(c, req.Token) {
+		s.logWithContext(c, "warn", "redeem activation code: turnstile verification rejected", logFields{"operation": operation, "user_id": user.ID})
 		return
 	}
 
 	updatedUser, added, err := s.store.RedeemActivationCode(c.Request.Context(), user.ID, code)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			s.logWithContext(c, "warn", "redeem activation code: code not found", logFields{"operation": operation, "user_id": user.ID, "code": code})
 			c.JSON(http.StatusBadRequest, gin.H{"error": "kod nie istnieje lub został już wykorzystany."})
 			return
 		}
-		s.logWithFields("error", "redeem activation code failed", logFields{"code": code, "user_id": user.ID, "error": err.Error()})
+		s.logWithContext(c, "error", "redeem activation code: store error", logFields{"operation": operation, "user_id": user.ID, "code": code, "error": err.Error()})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "nie udało się aktywować kodu"})
 		return
 	}
+
+	s.logWithContext(c, "info", "redeem activation code: success", logFields{"operation": operation, "user_id": user.ID, "code": code, "added_points": added})
 
 	c.JSON(http.StatusOK, gin.H{
 		"user":              sanitizeUser(updatedUser),
@@ -1509,7 +1777,6 @@ func (s *Server) handleRedeemActivationCode(c *gin.Context) {
 		"pixel_cost_points": s.pixelCostPoints,
 	})
 }
-
 func (s *Server) isPixelURLBlocked(rawURL string) (string, bool) {
 	if s == nil {
 		return "", false
@@ -1546,27 +1813,38 @@ func (s *Server) handleUpdatePixel(c *gin.Context) {
 		return
 	}
 
+	const operation = "update_pixels"
+
+	s.logWithContext(c, "info", "update pixels: request received", logFields{"operation": operation, "user_id": user.ID})
+
 	var req UpdatePixelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		s.logWithContext(c, "warn", "update pixels: invalid payload", logFields{"operation": operation, "user_id": user.ID, "error": err.Error()})
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
 
 	if len(req.Pixels) == 0 {
+		s.logWithContext(c, "warn", "update pixels: no pixels provided", logFields{"operation": operation, "user_id": user.ID})
 		c.JSON(http.StatusBadRequest, gin.H{"error": "no pixels provided"})
 		return
 	}
+
+	s.logWithContext(c, "info", "update pixels: payload validated", logFields{"operation": operation, "user_id": user.ID, "pixel_count": len(req.Pixels)})
 
 	results := make([]PixelUpdateResult, 0, len(req.Pixels))
 	currentUser := user
 	var anySuccess bool
 	var firstErrStatus int
 	var firstErrMessage string
+	successCount := 0
 
 	for _, item := range req.Pixels {
 		result := PixelUpdateResult{ID: item.ID}
+		pixelFields := logFields{"operation": operation, "user_id": user.ID, "pixel_id": item.ID}
 		if item.ID < 0 || item.ID >= storage.TotalPixels {
 			result.Error = "invalid pixel id"
+			s.logWithContext(c, "warn", "update pixels: invalid pixel id", pixelFields)
 			if firstErrStatus == 0 {
 				firstErrStatus = http.StatusBadRequest
 				firstErrMessage = result.Error
@@ -1576,11 +1854,13 @@ func (s *Server) handleUpdatePixel(c *gin.Context) {
 		}
 
 		pixel := storage.Pixel{ID: item.ID}
-		if strings.ToLower(item.Status) == "taken" {
+		desiredStatus := strings.ToLower(item.Status)
+		if desiredStatus == "taken" {
 			color := strings.TrimSpace(item.Color)
 			url := strings.TrimSpace(item.URL)
 			if color == "" || url == "" {
 				result.Error = "taken pixels require color and url"
+				s.logWithContext(c, "warn", "update pixels: missing color or url", pixelFields)
 				if firstErrStatus == 0 {
 					firstErrStatus = http.StatusBadRequest
 					firstErrMessage = result.Error
@@ -1590,6 +1870,7 @@ func (s *Server) handleUpdatePixel(c *gin.Context) {
 			}
 			if message, blocked := s.isPixelURLBlocked(url); blocked {
 				result.Error = message
+				s.logWithContext(c, "warn", "update pixels: url blocked", logFields{"operation": operation, "user_id": user.ID, "pixel_id": item.ID, "reason": message})
 				if firstErrStatus == 0 {
 					firstErrStatus = http.StatusBadRequest
 					firstErrMessage = result.Error
@@ -1613,15 +1894,18 @@ func (s *Server) handleUpdatePixel(c *gin.Context) {
 			case errors.Is(err, sql.ErrNoRows):
 				result.Error = "pixel not found"
 				status = http.StatusNotFound
+				s.logWithContext(c, "warn", "update pixels: pixel not found", pixelFields)
 			case errors.Is(err, storage.ErrPixelOwnedByAnotherUser):
 				result.Error = "pixel already owned"
 				status = http.StatusForbidden
+				s.logWithContext(c, "warn", "update pixels: pixel owned by another user", pixelFields)
 			case errors.Is(err, storage.ErrInsufficientPoints):
 				result.Error = "brak wystarczającej liczby punktów. Aktywuj kod, aby zdobyć więcej."
 				status = http.StatusForbidden
+				s.logWithContext(c, "warn", "update pixels: insufficient points", logFields{"operation": operation, "user_id": user.ID, "pixel_id": item.ID, "cost": s.pixelCostPoints})
 			default:
 				result.Error = "failed to update pixel"
-				s.logWithFields("error", "update pixel", logFields{"pixel_id": item.ID, "error": err.Error(), "user_id": user.ID})
+				s.logWithContext(c, "error", "update pixels: unexpected error", logFields{"operation": operation, "user_id": user.ID, "pixel_id": item.ID, "error": err.Error()})
 			}
 
 			if firstErrStatus == 0 {
@@ -1633,9 +1917,19 @@ func (s *Server) handleUpdatePixel(c *gin.Context) {
 		}
 
 		anySuccess = true
+		successCount++
 		currentUser = updatedUser
 		result.Pixel = &updatedPixel
 		results = append(results, result)
+
+		s.logWithContext(c, "info", "update pixels: pixel updated", logFields{
+			"operation":      operation,
+			"user_id":        user.ID,
+			"pixel_id":       item.ID,
+			"new_status":     updatedPixel.Status,
+			"url_provided":   updatedPixel.URL != "",
+			"color_provided": updatedPixel.Color != "",
+		})
 	}
 
 	if !anySuccess {
@@ -1647,6 +1941,7 @@ func (s *Server) handleUpdatePixel(c *gin.Context) {
 		if message == "" {
 			message = "failed to update pixels"
 		}
+		s.logWithContext(c, "warn", "update pixels: no updates applied", logFields{"operation": operation, "user_id": user.ID, "failure_count": len(results)})
 		c.JSON(status, gin.H{
 			"error":             message,
 			"results":           results,
@@ -1656,13 +1951,14 @@ func (s *Server) handleUpdatePixel(c *gin.Context) {
 		return
 	}
 
+	s.logWithContext(c, "info", "update pixels: completed", logFields{"operation": operation, "user_id": user.ID, "success_count": successCount, "failure_count": len(results) - successCount})
+
 	c.JSON(http.StatusOK, gin.H{
 		"results":           results,
 		"user":              sanitizeUser(currentUser),
 		"pixel_cost_points": s.pixelCostPoints,
 	})
 }
-
 func seedDemoPixels(ctx context.Context, store storage.Store) {
 	demo := []storage.Pixel{
 		{ID: 500500, Status: "taken", Color: "#ff4d4f", URL: "https://example.com"},

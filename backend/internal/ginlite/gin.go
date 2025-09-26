@@ -16,9 +16,12 @@ type HandlerFunc func(*Context)
 type H map[string]interface{}
 
 type Context struct {
-	Writer  http.ResponseWriter
-	Request *http.Request
-	params  map[string]string
+	Writer   http.ResponseWriter
+	Request  *http.Request
+	params   map[string]string
+	handlers []HandlerFunc
+	index    int
+	values   map[string]any
 }
 
 func (c *Context) JSON(status int, body interface{}) {
@@ -51,6 +54,29 @@ func (c *Context) Param(name string) string {
 	return c.params[name]
 }
 
+func (c *Context) Set(key string, value any) {
+	if c.values == nil {
+		c.values = make(map[string]any)
+	}
+	c.values[key] = value
+}
+
+func (c *Context) Get(key string) (any, bool) {
+	if c.values == nil {
+		return nil, false
+	}
+	value, ok := c.values[key]
+	return value, ok
+}
+
+func (c *Context) Next() {
+	c.index++
+	for c.index < len(c.handlers) {
+		c.handlers[c.index](c)
+		c.index++
+	}
+}
+
 type route struct {
 	method  string
 	path    string
@@ -58,20 +84,28 @@ type route struct {
 }
 
 type Engine struct {
-	routes  []route
-	noRoute HandlerFunc
+	routes     []route
+	noRoute    HandlerFunc
+	middleware []HandlerFunc
 }
 
 func Default() *Engine {
 	return &Engine{}
 }
 
-func (e *Engine) Use(_ ...HandlerFunc) {
-	// middleware stub
+func (e *Engine) Use(handlers ...HandlerFunc) {
+	e.middleware = append(e.middleware, handlers...)
 }
 
 func (e *Engine) addRoute(method, path string, handler HandlerFunc) {
-	e.routes = append(e.routes, route{method: method, path: path, handler: handler})
+	combined := make([]HandlerFunc, 0, len(e.middleware)+1)
+	combined = append(combined, e.middleware...)
+	combined = append(combined, handler)
+	e.routes = append(e.routes, route{method: method, path: path, handler: func(c *Context) {
+		c.handlers = combined
+		c.index = -1
+		c.Next()
+	}})
 }
 
 func (e *Engine) GET(path string, handler HandlerFunc) {
@@ -126,14 +160,14 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	handler, params := e.match(r.Method, r.URL.Path)
 	if handler == nil {
 		if e.noRoute != nil {
-			ctx := &Context{Writer: w, Request: r, params: map[string]string{}}
+			ctx := &Context{Writer: w, Request: r, params: map[string]string{}, index: -1}
 			e.noRoute(ctx)
 			return
 		}
 		http.NotFound(w, r)
 		return
 	}
-	ctx := &Context{Writer: w, Request: r, params: params}
+	ctx := &Context{Writer: w, Request: r, params: params, index: -1}
 	handler(ctx)
 }
 

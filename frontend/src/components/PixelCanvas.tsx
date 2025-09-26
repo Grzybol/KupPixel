@@ -1,4 +1,4 @@
-import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MouseEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useI18n } from "../lang/I18nProvider";
 
@@ -225,7 +225,7 @@ export default function PixelCanvas({
     [offsetX, offsetY, visibleHeight, visibleWidth]
   );
 
-  const getCanvasPosition = (event: MouseEvent<HTMLCanvasElement>) => {
+  const getCanvasPosition = (event: { clientX: number; clientY: number }) => {
     const info = getBoardCoordinates(event);
     if (!info) {
       return null;
@@ -264,43 +264,33 @@ export default function PixelCanvas({
     }
   };
 
-  const handleMouseDown = (event: MouseEvent<HTMLCanvasElement>) => {
-    if (event.button !== 0) return;
-    if (event.ctrlKey || event.shiftKey) {
-      isPanningRef.current = true;
-      lastPanPositionRef.current = { x: event.clientX, y: event.clientY };
-      preventClickRef.current = false;
+  const finalizeSelection = () => {
+    if (!didDragRef.current) {
       resetSelection();
       return;
     }
-    const position = getCanvasPosition(event);
-    if (!position) return;
-    dragStartRef.current = { x: position.x, y: position.y };
-    isDraggingRef.current = true;
-    didDragRef.current = false;
-    preventClickRef.current = false;
-    setSelectionRect(null);
-    setPreviewPixels([]);
+
+    preventClickRef.current = true;
+    onSelectionComplete([...previewPixels]);
+    resetSelection();
   };
 
-  const handleMouseMove = (event: MouseEvent<HTMLCanvasElement>) => {
-    if ((event.buttons & 1) === 1 && (event.ctrlKey || event.shiftKey) && !isPanningRef.current) {
-      isPanningRef.current = true;
-      lastPanPositionRef.current = { x: event.clientX, y: event.clientY };
-      preventClickRef.current = true;
-      resetSelection();
-    }
-    if (isPanningRef.current) {
-      const canvas = canvasRef.current;
+  const startPanning = useCallback((clientX: number, clientY: number) => {
+    isPanningRef.current = true;
+    lastPanPositionRef.current = { x: clientX, y: clientY };
+  }, []);
+
+  const updatePanning = useCallback(
+    (clientX: number, clientY: number, canvas: HTMLCanvasElement) => {
       const last = lastPanPositionRef.current;
-      if (!canvas || !last) {
-        lastPanPositionRef.current = { x: event.clientX, y: event.clientY };
+      if (!last) {
+        lastPanPositionRef.current = { x: clientX, y: clientY };
         return;
       }
       const rect = canvas.getBoundingClientRect();
-      const deltaX = event.clientX - last.x;
-      const deltaY = event.clientY - last.y;
-      lastPanPositionRef.current = { x: event.clientX, y: event.clientY };
+      const deltaX = clientX - last.x;
+      const deltaY = clientY - last.y;
+      lastPanPositionRef.current = { x: clientX, y: clientY };
       if (rect.width === 0 || rect.height === 0) {
         return;
       }
@@ -311,8 +301,60 @@ export default function PixelCanvas({
       }
       setOffsetX((prev) => clampOffset(prev - boardDeltaX, visibleWidth, width));
       setOffsetY((prev) => clampOffset(prev - boardDeltaY, visibleHeight, height));
+    },
+    [clampOffset, height, visibleHeight, visibleWidth, width]
+  );
+
+  const handlePointerDown = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (event.pointerType === "mouse") {
+      if (event.button !== 0) return;
+      if (event.ctrlKey || event.shiftKey) {
+        startPanning(event.clientX, event.clientY);
+        preventClickRef.current = false;
+        resetSelection();
+        return;
+      }
+      const position = getCanvasPosition(event);
+      if (!position) return;
+      dragStartRef.current = { x: position.x, y: position.y };
+      isDraggingRef.current = true;
+      didDragRef.current = false;
+      preventClickRef.current = false;
+      setSelectionRect(null);
+      setPreviewPixels([]);
       return;
     }
+
+    startPanning(event.clientX, event.clientY);
+    preventClickRef.current = false;
+    resetSelection();
+    event.preventDefault();
+    if (event.currentTarget.setPointerCapture) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+  };
+
+  const handlePointerMove = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (event.pointerType === "mouse") {
+      if ((event.buttons & 1) === 1 && (event.ctrlKey || event.shiftKey) && !isPanningRef.current) {
+        startPanning(event.clientX, event.clientY);
+        preventClickRef.current = true;
+        resetSelection();
+      }
+    }
+
+    if (isPanningRef.current) {
+      if (event.pointerType !== "mouse") {
+        event.preventDefault();
+      }
+      updatePanning(event.clientX, event.clientY, event.currentTarget);
+      return;
+    }
+
+    if (event.pointerType !== "mouse") {
+      return;
+    }
+
     if (!isDraggingRef.current || !dragStartRef.current) return;
     const position = getCanvasPosition(event);
     if (!position) return;
@@ -349,18 +391,22 @@ export default function PixelCanvas({
     setPreviewPixels(freePixels);
   };
 
-  const finalizeSelection = () => {
-    if (!didDragRef.current) {
-      resetSelection();
+  const handlePointerUp = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (event.pointerType !== "mouse") {
+      if (event.currentTarget.releasePointerCapture) {
+        try {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        } catch {
+          // Ignore errors if the pointer was not captured.
+        }
+      }
+      if (isPanningRef.current) {
+        isPanningRef.current = false;
+        lastPanPositionRef.current = null;
+      }
       return;
     }
 
-    preventClickRef.current = true;
-    onSelectionComplete([...previewPixels]);
-    resetSelection();
-  };
-
-  const handleMouseUp = (event: MouseEvent<HTMLCanvasElement>) => {
     if (event.button !== 0) return;
     if (isPanningRef.current || event.ctrlKey || event.shiftKey) {
       isPanningRef.current = false;
@@ -370,6 +416,20 @@ export default function PixelCanvas({
     }
     if (!isDraggingRef.current) return;
     finalizeSelection();
+  };
+
+  const handlePointerCancel = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (event.currentTarget.releasePointerCapture) {
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        // Ignore errors if the pointer was not captured.
+      }
+    }
+    isPanningRef.current = false;
+    lastPanPositionRef.current = null;
+    preventClickRef.current = true;
+    resetSelection();
   };
 
   const handleMouseEnter = () => {
@@ -487,9 +547,10 @@ export default function PixelCanvas({
         width={width}
         height={height}
         onClick={handleClick}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         className="w-full border border-slate-700 rounded-lg shadow-md"

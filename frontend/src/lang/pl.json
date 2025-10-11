@@ -241,6 +241,9 @@
     "title": "Aktywuj kod punktowy",
     "info": "Aktywuj kod, aby otrzymać punkty i kupować piksele.",
     "currentBalance": "Aktualne saldo: {{points}} pkt",
+    "purchaseTitle": "Nie masz kodu?",
+    "purchaseDescription": "Kup kody punktowe na Kinguin i doładuj swoje konto.",
+    "purchaseCta": "Przejdź do Kinguin",
     "error": "Nie udało się aktywować kodu.",
     "submit": "Aktywuj",
     "submitting": "Aktywuję..."

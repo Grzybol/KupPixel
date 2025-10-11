@@ -241,6 +241,9 @@
     "title": "Redeem a point code",
     "info": "Redeem a code to receive points and buy pixels.",
     "currentBalance": "Current balance: {{points}} pts",
+    "purchaseTitle": "Need a code?",
+    "purchaseDescription": "Buy point codes on Kinguin to top up your account.",
+    "purchaseCta": "Open Kinguin",
     "error": "Failed to redeem the code.",
     "submit": "Redeem",
     "submitting": "Redeeming..."

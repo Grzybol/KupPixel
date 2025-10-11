@@ -5,6 +5,8 @@ import { useI18n } from "../lang/I18nProvider";
 import TurnstileWidget from "./TurnstileWidget";
 import { TURNSTILE_SITE_KEY } from "../config";
 
+const KINGUIN_POINTS_LINK = "https://www.kinguin.net/pl/category/392184/kuppixel-pl-100-points-cd-key";
+
 type ActivationCodeModalProps = {
   isOpen: boolean;
   onClose: () => void;
@@ -151,6 +153,21 @@ export default function ActivationCodeModal({ isOpen, onClose, onSuccess }: Acti
             ×
           </button>
         </div>
+
+        <a
+          href={KINGUIN_POINTS_LINK}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-6 flex items-start justify-between gap-3 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100 transition hover:border-emerald-400 hover:bg-emerald-500/20"
+        >
+          <div>
+            <p className="font-semibold text-emerald-200">{t("activationModal.purchaseTitle")}</p>
+            <p className="mt-1 text-xs text-emerald-100">{t("activationModal.purchaseDescription")}</p>
+          </div>
+          <span className="shrink-0 rounded-full bg-emerald-500 px-3 py-1 text-xs font-semibold text-emerald-950">
+            {t("activationModal.purchaseCta")}
+          </span>
+        </a>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <label className="block text-sm font-medium text-slate-200" htmlFor="activation-code">

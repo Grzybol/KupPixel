@@ -13,6 +13,7 @@
   },
   "include": [
     "tests/**/*.ts",
+    "src/env.d.ts",
     "src/utils/**/*.ts",
     "src/lang/**/*.ts",
     "src/lang/**/*.tsx",

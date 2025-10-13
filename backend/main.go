@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -90,6 +91,47 @@ const (
 	turnstileRequestIDKey = "turnstile.request_id"
 	transactionIDKey      = "transactionID"
 )
+
+type responseRecorder struct {
+	http.ResponseWriter
+	status       int
+	bytesWritten int
+}
+
+func newResponseRecorder(w http.ResponseWriter) *responseRecorder {
+	return &responseRecorder{ResponseWriter: w, status: http.StatusOK}
+}
+
+func (r *responseRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *responseRecorder) Write(p []byte) (int, error) {
+	n, err := r.ResponseWriter.Write(p)
+	r.bytesWritten += n
+	return n, err
+}
+
+func (r *responseRecorder) Flush() {
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (r *responseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hijacker, ok := r.ResponseWriter.(http.Hijacker); ok {
+		return hijacker.Hijack()
+	}
+	return nil, nil, errors.New("hijacker not supported")
+}
+
+func (r *responseRecorder) Push(target string, opts *http.PushOptions) error {
+	if pusher, ok := r.ResponseWriter.(http.Pusher); ok {
+		return pusher.Push(target, opts)
+	}
+	return http.ErrNotSupported
+}
 
 type contextKey string
 
@@ -189,17 +231,72 @@ func (s *Server) logf(level, format string, args ...interface{}) {
 }
 
 func (s *Server) logWithContext(c *gin.Context, level, message string, fields logFields) {
-	data := make(logFields, len(fields)+1)
+	data := make(logFields, len(fields)+6)
 	for k, v := range fields {
 		if k == "" || v == nil {
 			continue
 		}
 		data[k] = v
 	}
+	if c != nil && c.Request != nil {
+		req := c.Request
+		if _, exists := data["remote_ip"]; !exists {
+			if ip := extractRemoteIP(req); ip != "" {
+				data["remote_ip"] = ip
+			}
+		}
+		if _, exists := data["path"]; !exists && req.URL != nil {
+			data["path"] = req.URL.Path
+		}
+		if _, exists := data["http_method"]; !exists {
+			method := strings.TrimSpace(req.Method)
+			if method != "" {
+				data["http_method"] = method
+			}
+		}
+		if _, exists := data["user_agent"]; !exists {
+			if ua := strings.TrimSpace(req.UserAgent()); ua != "" {
+				data["user_agent"] = ua
+			}
+		}
+		if _, exists := data["referer"]; !exists {
+			if ref := strings.TrimSpace(req.Referer()); ref != "" {
+				data["referer"] = ref
+			}
+		}
+	}
 	if id := transactionIDFromGin(c); id != "" {
 		data[transactionIDKey] = id
 	}
 	s.logWithFields(level, message, data)
+}
+
+func (s *Server) requestLoggerMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+
+		recorder := newResponseRecorder(c.Writer)
+		c.Writer = recorder
+
+		c.Next()
+
+		duration := time.Since(start)
+		fields := logFields{
+			"operation":      "http_request",
+			"status":         recorder.status,
+			"response_bytes": recorder.bytesWritten,
+			"latency_ms":     duration.Milliseconds(),
+		}
+		if c.Request != nil && c.Request.URL != nil {
+			if rawQuery := strings.TrimSpace(c.Request.URL.RawQuery); rawQuery != "" {
+				fields["query_string"] = rawQuery
+			}
+		}
+
+		s.logWithContext(c, "info", "http request completed", fields)
+
+		c.Writer = recorder.ResponseWriter
+	}
 }
 
 func (s *Server) logInfof(format string, args ...interface{}) {
@@ -913,6 +1010,8 @@ func main() {
 		stdlog:                   log.New(os.Stderr, "", log.LstdFlags),
 		pixelURLBlacklist:        cfg.PixelURLBlacklist,
 	}
+
+	router.Use(server.requestLoggerMiddleware())
 
 	server.logWithFields("info", "startup config", logFields{
 		"config_path":                configPath,

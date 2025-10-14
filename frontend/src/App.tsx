@@ -207,7 +207,7 @@ function LandingPage() {
           </div>
         )}
       </header>
-      <main className="mx-auto flex max-w-5xl flex-col items-center gap-6 px-4 pb-16">
+      <main className="mx-auto flex w-full flex-col items-center gap-6 px-4 pb-16">
         {loading && <div className="text-slate-300">{t("landing.loading")}</div>}
         {error && <div className="text-rose-400">{error}</div>}
         {data && (

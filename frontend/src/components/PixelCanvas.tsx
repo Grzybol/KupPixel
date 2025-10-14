@@ -541,7 +541,7 @@ export default function PixelCanvas({
   const canZoomOut = zoom > 1 + EPSILON;
 
   return (
-    <div className="relative w-full max-w-4xl">
+    <div className="relative w-full">
       <canvas
         ref={canvasRef}
         width={width}
